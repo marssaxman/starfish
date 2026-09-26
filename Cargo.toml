@@ -1,0 +1,14 @@
+[package]
+name = "starfish-studio"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "A small native instrument for exploring procedural image programs"
+
+[dependencies]
+eframe = { version = "0.33.3", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+
+# Keep the CPU preview responsive with ordinary `cargo run`.
+[profile.dev]
+opt-level = 2
+
