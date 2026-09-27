@@ -1,0 +1,33 @@
+starfish 1;
+program "Crosscurrent" @id("crosscurrent") {
+    param rotation: Angle = -18deg in -180deg..180deg step 0.5deg;
+    param fine_frequency: Frequency = 12 in 1..24 step 0.05;
+    param broad_frequency: Frequency = 3.5 in 0.5..10 step 0.05;
+    param ring_frequency: Frequency = 2.6 in 0.2..8 step 0.05;
+    param ring_strength: Scalar = 0.85 in 0..2 step 0.01;
+    param phase: Angle = 35deg in -180deg..180deg step 0.5deg;
+
+    frame shared = rotate(world, rotation);
+    axis major = vec2(1, 0);
+    axis crossing = rotate(major, 76deg);
+
+    component stripe(p: Field<Point2>, axis: Vec2,
+                     frequency: Frequency, phase: Angle) -> Field<Scalar> =
+        wave(dot(p, axis), frequency, phase);
+
+    field fine: Scalar = stripe(shared, major, fine_frequency, phase);
+    field broad: Scalar = stripe(shared, crossing, broad_frequency, phase);
+    field rings: Scalar =
+        wave(length(shared - point2(-0.42, 0.30)), ring_frequency, phase);
+    field composition: Scalar =
+        tanh(fine * broad + ring_strength * rings);
+
+    palette dusk = smooth [
+        rgb(0.06, 0.035, 0.12),
+        rgb(0.24, 0.13, 0.37),
+        rgb(0.62, 0.34, 0.47),
+        rgb(0.91, 0.70, 0.47),
+        rgb(0.98, 0.91, 0.73)
+    ];
+    output image: Field<Color> = palette(dusk, composition);
+}

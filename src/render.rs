@@ -2,7 +2,7 @@
 
 use crate::{
     evaluate::{Evaluator, Value},
-    program::{ParameterBindings, StarfishProgram, ValueType},
+    program::{ParameterBindings, StarfishProgram},
 };
 use std::time::{Duration, Instant};
 
@@ -28,13 +28,7 @@ pub fn render(
     if request.width == 0 || request.height == 0 || request.width > 4096 || request.height > 4096 {
         return Err("Render dimensions must be between 1 and 4096.".into());
     }
-    let node = program
-        .node(request.output)
-        .ok_or_else(|| format!("Unknown output: {}", request.output))?;
-    if node.value_type == ValueType::Coordinates {
-        return Err("Coordinate outputs cannot be displayed as images in this prototype.".into());
-    }
-    let evaluator = Evaluator::new(program, bindings, request.output)?;
+    let mut evaluator = Evaluator::new(program, bindings, request.output)?;
     let mut rgba = Vec::with_capacity(request.width * request.height * 4);
     for row in 0..request.height {
         let y = 1.0 - 2.0 * (row as f32 + 0.5) / request.height as f32;
@@ -43,7 +37,7 @@ pub fn render(
             let rgb = match evaluator.sample(x, y) {
                 Value::Scalar(value) => [(value + 1.0) * 0.5; 3],
                 Value::Color(rgb) => rgb,
-                Value::Coordinates(_) => unreachable!("coordinate output rejected above"),
+                Value::Point(_) => unreachable!("point output rejected above"),
             };
             rgba.extend(rgb.map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8));
             rgba.push(255);
@@ -77,7 +71,7 @@ mod tests {
             )
             .unwrap()
         };
-        let before = image(program.output);
+        let before = image(&program.output);
         for id in ["pattern_a", "pattern_b", "interference", "radial", "field"] {
             let scalar = image(id);
             assert_eq!(scalar.rgba.len(), 32 * 32 * 4);
@@ -90,7 +84,7 @@ mod tests {
             assert!(scalar.rgba.chunks_exact(4).any(|p| p[0] != scalar.rgba[0]));
         }
         assert_eq!(program.output, "color");
-        assert_eq!(before.rgba, image(program.output).rgba);
+        assert_eq!(before.rgba, image(&program.output).rgba);
         assert!(before.rgba.chunks_exact(4).any(|p| p[0] != p[1]));
     }
 

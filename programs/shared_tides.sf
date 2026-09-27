@@ -1,0 +1,39 @@
+starfish 1;
+program "Shared tides" @id("shared-tides") {
+    param rotation: Angle = 24deg in -180deg..180deg step 0.5deg;
+    param frequency_a: Frequency = 6 in 0.5..20 step 0.05;
+    param frequency_b: Frequency = 9 in 0.5..20 step 0.05;
+    param radial_frequency: Frequency = 1.8 in 0.2..8 step 0.05;
+    param interference_strength: Scalar = 0.65 in 0..2 step 0.01;
+    param radial_strength: Scalar = 1.1 in 0..2 step 0.01;
+    param phase: Angle = 0rad in -180deg..180deg step 0.5deg;
+
+    frame shared @id("rotated") = rotate(world, rotation);
+
+    component stripe(p: Field<Point2>, axis: Vec2,
+                     frequency: Frequency, phase: Angle) -> Field<Scalar> =
+        wave(dot(p, axis), frequency, phase);
+
+    axis first = vec2(1, 0);
+    axis second = rotate(first, 53.130102deg);
+
+    field pattern_a @id("pattern_a"): Scalar =
+        stripe(shared, first, frequency_a, phase);
+    field pattern_b @id("pattern_b"): Scalar =
+        stripe(shared, second, frequency_b, phase);
+    field interference @id("interference"): Scalar =
+        pattern_a * pattern_b;
+    field radial @id("radial"): Scalar =
+        wave(length(shared - point2(0.25, -0.15)), radial_frequency, phase);
+    field composed @id("field"): Scalar =
+        tanh(interference_strength * interference + radial_strength * radial);
+
+    palette tides = smooth [
+        rgb(0.035, 0.065, 0.13),
+        rgb(0.055, 0.32, 0.39),
+        rgb(0.36, 0.69, 0.65),
+        rgb(0.95, 0.86, 0.62),
+        rgb(0.83, 0.27, 0.20)
+    ];
+    output image @id("color"): Field<Color> = palette(tides, composed);
+}

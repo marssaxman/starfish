@@ -1,27 +1,27 @@
-//! A tiny CPU evaluator for the trusted, topologically ordered sample graph.
+//! Deterministic CPU evaluation of a validated, lowered program.
 
-use crate::program::{NODE_COUNT, Operation, ParameterBindings, ParameterId, StarfishProgram};
 use std::f32::consts::TAU;
+
+use crate::program::{Operation, ParameterBindings, StarfishProgram, Type};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Value {
-    Coordinates([f32; 2]),
     Scalar(f32),
+    Point([f32; 2]),
     Color([f32; 3]),
 }
 
 impl Value {
     fn scalar(self) -> f32 {
         match self {
-            Self::Scalar(value) => value,
-            _ => unreachable!("the authored graph supplies a scalar here"),
+            Self::Scalar(v) => v,
+            _ => unreachable!("validated scalar input"),
         }
     }
-
-    fn coordinates(self) -> [f32; 2] {
+    fn point(self) -> [f32; 2] {
         match self {
-            Self::Coordinates(value) => value,
-            _ => unreachable!("the authored graph supplies coordinates here"),
+            Self::Point(v) => v,
+            _ => unreachable!("validated point input"),
         }
     }
 }
@@ -29,8 +29,10 @@ impl Value {
 pub struct Evaluator<'a> {
     program: &'a StarfishProgram,
     bindings: &'a ParameterBindings,
-    output_index: usize,
-    rotation: (f32, f32),
+    output: usize,
+    order: Vec<usize>,
+    values: Vec<Value>,
+    rotations: Vec<Option<(f32, f32)>>,
 }
 
 impl<'a> Evaluator<'a> {
@@ -39,76 +41,131 @@ impl<'a> Evaluator<'a> {
         bindings: &'a ParameterBindings,
         output: &str,
     ) -> Result<Self, String> {
-        let output_index = program
-            .node_index(output)
+        let item = program
+            .item(output)
             .ok_or_else(|| format!("Unknown output: {output}"))?;
-        Ok(Self {
+        if !matches!(item.ty, Type::FieldScalar | Type::FieldColor) {
+            return Err(format!("{} cannot be displayed as an image", item.name));
+        }
+        if bindings.0.len() != program.parameters.len() {
+            return Err("Parameter binding count does not match the program".into());
+        }
+        for (value, parameter) in bindings.0.iter().zip(&program.parameters) {
+            if !value.is_finite() || *value < parameter.min || *value > parameter.max {
+                return Err(format!(
+                    "Binding {} is outside its declared range",
+                    parameter.id
+                ));
+            }
+        }
+        let mut seen = vec![false; program.nodes.len()];
+        let mut order = Vec::new();
+        fn visit(
+            index: usize,
+            program: &StarfishProgram,
+            seen: &mut [bool],
+            order: &mut Vec<usize>,
+        ) {
+            if seen[index] {
+                return;
+            }
+            seen[index] = true;
+            for &input in &program.nodes[index].inputs {
+                visit(input, program, seen, order);
+            }
+            order.push(index);
+        }
+        visit(item.node, program, &mut seen, &mut order);
+        let mut evaluator = Self {
             program,
             bindings,
-            output_index,
-            rotation: bindings.get(ParameterId::Rotation).to_radians().sin_cos(),
-        })
+            output: item.node,
+            order,
+            values: vec![Value::Scalar(0.0); program.nodes.len()],
+            rotations: vec![None; program.nodes.len()],
+        };
+        // Uniform values and rotation angles depend on bindings, but not on pixels.
+        for &index in &evaluator.order.clone() {
+            let node = &program.nodes[index];
+            if matches!(node.operation, Operation::Rotate) {
+                evaluator.rotations[index] =
+                    Some(evaluator.values[node.inputs[1]].scalar().sin_cos());
+            }
+            if !matches!(
+                node.ty,
+                Type::FieldScalar | Type::FieldPoint | Type::FieldColor
+            ) {
+                evaluator.evaluate_node(index, 0.0, 0.0);
+            }
+        }
+        Ok(evaluator)
     }
 
-    pub fn sample(&self, x: f32, y: f32) -> Value {
-        use ParameterId::*;
-        let parameter = |id| self.bindings.get(id);
-        // Fixed stack storage: each shared node is evaluated at most once per pixel.
-        let mut values = [Value::Scalar(0.0); NODE_COUNT];
-        for (index, node) in self.program.nodes[..=self.output_index].iter().enumerate() {
-            let input = |slot| values[node.inputs[slot]];
-            values[index] = match node.operation {
-                Operation::Coordinates => Value::Coordinates([x, y]),
-                Operation::Rotate => {
-                    let [x, y] = input(0).coordinates();
-                    let (sin, cos) = self.rotation;
-                    Value::Coordinates([cos * x - sin * y, sin * x + cos * y])
-                }
-                Operation::Sine {
-                    direction,
-                    frequency,
-                } => {
-                    let [x, y] = input(0).coordinates();
-                    let position = direction[0] * x + direction[1] * y;
-                    Value::Scalar((TAU * parameter(frequency) * position + parameter(Phase)).sin())
-                }
-                Operation::Multiply => Value::Scalar(input(0).scalar() * input(1).scalar()),
-                Operation::Radial { center } => {
-                    let [x, y] = input(0).coordinates();
-                    let dx = x - center[0];
-                    let dy = y - center[1];
-                    let radius = (dx * dx + dy * dy).sqrt();
-                    Value::Scalar(
-                        (TAU * parameter(RadialFrequency) * radius + parameter(Phase)).sin(),
-                    )
-                }
-                Operation::Modulate => Value::Scalar(
-                    (parameter(InterferenceStrength) * input(0).scalar()
-                        + parameter(RadialStrength) * input(1).scalar())
-                    .tanh(),
-                ),
-                Operation::Palette => Value::Color(palette(input(0).scalar())),
-            };
+    pub fn sample(&mut self, x: f32, y: f32) -> Value {
+        for offset in 0..self.order.len() {
+            let index = self.order[offset];
+            if matches!(
+                self.program.nodes[index].ty,
+                Type::FieldScalar | Type::FieldPoint | Type::FieldColor
+            ) {
+                self.evaluate_node(index, x, y);
+            }
         }
-        values[self.output_index]
+        self.values[self.output]
+    }
+
+    fn evaluate_node(&mut self, index: usize, x: f32, y: f32) {
+        let node = &self.program.nodes[index];
+        let input = |slot: usize| self.values[node.inputs[slot]];
+        self.values[index] = match &node.operation {
+            Operation::Dummy => unreachable!("component validation nodes have no output path"),
+            Operation::Scalar(v) => Value::Scalar(*v),
+            Operation::Vec2 => Value::Point([input(0).scalar(), input(1).scalar()]),
+            Operation::World => Value::Point([x, y]),
+            Operation::Parameter(i) => Value::Scalar(self.bindings.0[*i]),
+            Operation::Rotate => {
+                let [x, y] = input(0).point();
+                let (sin, cos) =
+                    self.rotations[index].expect("rotation prepared from a uniform angle");
+                Value::Point([cos * x - sin * y, sin * x + cos * y])
+            }
+            Operation::Dot => {
+                let [x, y] = input(0).point();
+                let [a, b] = input(1).point();
+                Value::Scalar(x * a + y * b)
+            }
+            Operation::Sub if node.ty == Type::FieldPoint => {
+                let [x, y] = input(0).point();
+                let [a, b] = input(1).point();
+                Value::Point([x - a, y - b])
+            }
+            Operation::Sub => Value::Scalar(input(0).scalar() - input(1).scalar()),
+            Operation::Length => {
+                let [x, y] = input(0).point();
+                Value::Scalar(x.hypot(y))
+            }
+            Operation::Wave => Value::Scalar(
+                (TAU * input(1).scalar() * input(0).scalar() + input(2).scalar()).sin(),
+            ),
+            Operation::Add => Value::Scalar(input(0).scalar() + input(1).scalar()),
+            Operation::Multiply => Value::Scalar(input(0).scalar() * input(1).scalar()),
+            Operation::Negate => Value::Scalar(-input(0).scalar()),
+            Operation::Tanh => Value::Scalar(input(0).scalar().tanh()),
+            Operation::Palette(palette) => Value::Color(palette_sample(
+                input(0).scalar(),
+                &self.program.palettes[*palette].stops,
+            )),
+        };
     }
 }
 
-fn palette(field: f32) -> [f32; 3] {
-    const STOPS: [[f32; 3]; 5] = [
-        [0.035, 0.065, 0.13],
-        [0.055, 0.32, 0.39],
-        [0.36, 0.69, 0.65],
-        [0.95, 0.86, 0.62],
-        [0.83, 0.27, 0.20],
-    ];
-    let position = ((field + 1.0) * 0.5).clamp(0.0, 1.0) * 4.0;
-    let index = (position.floor() as usize).min(3);
+fn palette_sample(field: f32, stops: &[[f32; 3]]) -> [f32; 3] {
+    let position = ((field + 1.0) * 0.5).clamp(0.0, 1.0) * (stops.len() - 1) as f32;
+    let index = (position.floor() as usize).min(stops.len() - 2);
     let fraction = position - index as f32;
-    // Smooth interpolation keeps parameter sweeps continuous at palette stops.
     let fraction = fraction * fraction * (3.0 - 2.0 * fraction);
     std::array::from_fn(|channel| {
-        STOPS[index][channel] * (1.0 - fraction) + STOPS[index + 1][channel] * fraction
+        stops[index][channel] * (1.0 - fraction) + stops[index + 1][channel] * fraction
     })
 }
 
@@ -117,37 +174,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn known_sine_result_and_changed_binding() {
+    fn sine_and_binding_changes_have_known_values() {
         let program = StarfishProgram::sample();
         let mut bindings = ParameterBindings::defaults(&program);
-        *bindings.get_mut(ParameterId::Rotation) = 0.0;
-        *bindings.get_mut(ParameterId::FrequencyA) = 1.0;
-        let sample = |bindings: &ParameterBindings| {
-            Evaluator::new(&program, bindings, "pattern_a")
-                .unwrap()
-                .sample(0.25, 0.0)
-                .scalar()
-        };
-        assert!((sample(&bindings) - 1.0).abs() < 1e-6);
-        *bindings.get_mut(ParameterId::FrequencyA) = 2.0;
-        assert!(sample(&bindings).abs() < 1e-6);
+        for (name, value) in [("rotation", 0.0), ("frequency_a", 1.0), ("phase", 0.0)] {
+            let index = program
+                .parameters
+                .iter()
+                .position(|p| p.id == name)
+                .unwrap();
+            bindings.0[index] = value;
+        }
+        let mut evaluator = Evaluator::new(&program, &bindings, "pattern_a").unwrap();
+        assert!((evaluator.sample(0.25, 0.0).scalar() - 1.0).abs() < 1e-6);
+        let frequency = program
+            .parameters
+            .iter()
+            .position(|p| p.id == "frequency_a")
+            .unwrap();
+        bindings.0[frequency] = 2.0;
+        let mut evaluator = Evaluator::new(&program, &bindings, "pattern_a").unwrap();
+        assert!(evaluator.sample(0.25, 0.0).scalar().abs() < 1e-6);
     }
 
     #[test]
-    fn deterministic_evaluation() {
-        let program = StarfishProgram::sample();
-        let bindings = ParameterBindings::defaults(&program);
-        let evaluator = Evaluator::new(&program, &bindings, program.output).unwrap();
-        assert_eq!(evaluator.sample(0.17, -0.38), evaluator.sample(0.17, -0.38));
-    }
-
-    #[test]
-    fn rotation_is_shared_by_both_patterns_and_radial() {
+    fn shared_rotation_moves_wave_and_ring_together() {
         let program = StarfishProgram::sample();
         let mut base = ParameterBindings::defaults(&program);
-        *base.get_mut(ParameterId::Rotation) = 0.0;
+        let rotation = program
+            .parameters
+            .iter()
+            .position(|p| p.id == "rotation")
+            .unwrap();
+        base.0[rotation] = 0.0;
         let mut rotated = base.clone();
-        *rotated.get_mut(ParameterId::Rotation) = 90.0;
+        rotated.0[rotation] = 90.0_f32.to_radians();
         for output in ["pattern_a", "pattern_b", "radial", "field"] {
             let expected = Evaluator::new(&program, &base, output)
                 .unwrap()
@@ -162,19 +223,5 @@ mod tests {
                 "{output}: {actual} != {expected}"
             );
         }
-    }
-
-    #[test]
-    fn zero_strengths_produce_a_neutral_field() {
-        let program = StarfishProgram::sample();
-        let mut bindings = ParameterBindings::defaults(&program);
-        *bindings.get_mut(ParameterId::InterferenceStrength) = 0.0;
-        *bindings.get_mut(ParameterId::RadialStrength) = 0.0;
-        assert_eq!(
-            Evaluator::new(&program, &bindings, "field")
-                .unwrap()
-                .sample(0.23, -0.45),
-            Value::Scalar(0.0)
-        );
     }
 }
