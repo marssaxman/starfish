@@ -1,12 +1,15 @@
 #![forbid(unsafe_code)]
 
+mod comparison;
 mod evaluate;
+mod gallery;
+mod generate;
 mod program;
 mod render;
 mod source;
 mod studio;
 
-use std::{env, fs, io::Write};
+use std::{env, fs, path::Path};
 
 use program::{ParameterBindings, StarfishProgram};
 use render::RenderRequest;
@@ -27,12 +30,31 @@ fn run() -> Result<(), String> {
         ),
         [flag] if flag == "--help" || flag == "-h" => {
             println!(
-                "Usage:\n  starfish-studio [studio] [program.sf]\n  starfish-studio render program.sf output-id image.ppm [width height]"
+                "Usage:\n  starfish-studio [studio] [program.sf]\n  starfish-studio render program.sf output-id image.ppm [width height]\n  starfish-studio generate directory [seed [pairs]]\n  starfish-studio gallery directory\n\nGeneration defaults: seed 42, 12 pairs. The output directory must be new."
             );
             Ok(())
         }
         [path] => launch(load(path)?, path.clone()),
         [command, path] if command == "studio" => launch(load(path)?, path.clone()),
+        [command, directory] if command == "gallery" => launch_gallery(directory),
+        [command, directory, options @ ..] if command == "generate" => {
+            let (seed, count) = match options {
+                [] => (comparison::DEFAULT_SEED, comparison::DEFAULT_PAIRS),
+                [seed] => (parse_seed(seed)?, comparison::DEFAULT_PAIRS),
+                [seed, count] => (
+                    parse_seed(seed)?,
+                    count
+                        .parse::<usize>()
+                        .map_err(|_| "Pair count must be a positive integer".to_owned())?,
+                ),
+                _ => return Err("Usage: starfish-studio generate directory [seed [pairs]]".into()),
+            };
+            comparison::write_batch(Path::new(directory), seed, count)?;
+            println!(
+                "Generated {count} comparison pairs in {directory} (seed {seed}).\nBrowse with: cargo run -- gallery {directory}"
+            );
+            Ok(())
+        }
         [command, path, output, destination] if command == "render" => {
             render_file(path, output, destination, 512, 512)
         }
@@ -47,6 +69,11 @@ fn run() -> Result<(), String> {
         }
         _ => Err("Invalid arguments. Run with --help for usage.".into()),
     }
+}
+
+fn parse_seed(seed: &str) -> Result<u64, String> {
+    seed.parse()
+        .map_err(|_| "Seed must be an unsigned 64-bit integer".to_owned())
 }
 
 fn load(path: &str) -> Result<StarfishProgram, String> {
@@ -77,14 +104,9 @@ fn render_file(
             height,
         },
     )?;
-    let mut file =
+    let file =
         fs::File::create(destination).map_err(|e| format!("Cannot create {destination}: {e}"))?;
-    write!(file, "P6\n{} {}\n255\n", image.width, image.height)
-        .map_err(|e| format!("Cannot write {destination}: {e}"))?;
-    for pixel in image.rgba.chunks_exact(4) {
-        file.write_all(&pixel[..3])
-            .map_err(|e| format!("Cannot write {destination}: {e}"))?;
-    }
+    render::write_ppm(&image, file).map_err(|e| format!("Cannot write {destination}: {e}"))?;
     println!(
         "Rendered {} × {} {} to {} in {:.1} ms",
         width,
@@ -107,7 +129,29 @@ fn launch(program: StarfishProgram, path: String) -> Result<(), String> {
     eframe::run_native(
         "Starfish Studio",
         options,
-        Box::new(move |cc| Ok(Box::new(studio::Studio::new(cc, program, path)))),
+        Box::new(move |cc| Ok(Box::new(studio::Studio::new(&cc.egui_ctx, program, path)))),
     )
     .map_err(|e| e.to_string())
+}
+
+fn launch_gallery(directory: &str) -> Result<(), String> {
+    let pairs = gallery::load(Path::new(directory))?;
+    let directory = directory.to_owned();
+    let options = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default().with_inner_size([1100.0, 800.0]),
+        renderer: eframe::Renderer::Glow,
+        ..Default::default()
+    };
+    eframe::run_native(
+        "Starfish Comparisons",
+        options,
+        Box::new(move |cc| {
+            Ok(Box::new(gallery::Gallery::new(
+                &cc.egui_ctx,
+                directory,
+                pairs,
+            )))
+        }),
+    )
+    .map_err(|error| error.to_string())
 }

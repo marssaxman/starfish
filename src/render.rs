@@ -4,7 +4,10 @@ use crate::{
     evaluate::{Evaluator, Value},
     program::{ParameterBindings, StarfishProgram},
 };
-use std::time::{Duration, Instant};
+use std::{
+    io::{self, BufWriter, Write},
+    time::{Duration, Instant},
+};
 
 pub struct RenderRequest<'a> {
     pub output: &'a str,
@@ -17,6 +20,15 @@ pub struct RenderedImage {
     pub height: usize,
     pub rgba: Vec<u8>,
     pub duration: Duration,
+}
+
+pub fn write_ppm(image: &RenderedImage, destination: impl Write) -> io::Result<()> {
+    let mut writer = BufWriter::new(destination);
+    write!(writer, "P6\n{} {}\n255\n", image.width, image.height)?;
+    for pixel in image.rgba.chunks_exact(4) {
+        writer.write_all(&pixel[..3])?;
+    }
+    writer.flush()
 }
 
 pub fn render(

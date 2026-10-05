@@ -1,0 +1,482 @@
+//! Pure, versioned synthesis: seed -> design plan -> self-contained source.
+//! Rendering, files, and Studio are clients of this module.
+
+use std::fmt::Write;
+
+pub const GENERATOR_VERSION: &str = "starfish-relations-v1";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Condition {
+    Coordinated,
+    Independent,
+}
+
+impl Condition {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Coordinated => "coordinated",
+            Self::Independent => "independent",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MotifKind {
+    Stripe,
+    Ring,
+}
+
+impl MotifKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Stripe => "stripe",
+            Self::Ring => "ring",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Orientation {
+    Relative(f64),
+    Independent(f64),
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Scale {
+    Ratio(u32, u32),
+    Independent(f64),
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Placement {
+    Origin,
+    Anchor,
+    Mirror,
+    Independent([f64; 2]),
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Phase {
+    Shared,
+    Offset(f64),
+    Independent(f64),
+}
+
+#[derive(Clone, Debug)]
+struct Motif {
+    kind: MotifKind,
+    orientation: Orientation,
+    scale: Scale,
+    placement: Placement,
+    phase: Phase,
+    weight: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Composition {
+    Weave,
+    Layers,
+    Modulate,
+}
+
+impl Composition {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Weave => "weave",
+            Self::Layers => "layers",
+            Self::Modulate => "modulate",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DesignPlan {
+    pub seed: u64,
+    pub condition: Condition,
+    rotation: f64,
+    frequency: f64,
+    phase: f64,
+    anchor: [f64; 2],
+    palette: usize,
+    composition: Composition,
+    motifs: Vec<Motif>,
+}
+
+pub struct ComparisonPair {
+    pub seed: u64,
+    pub a: DesignPlan,
+    pub b: DesignPlan,
+}
+
+/// Separate random streams keep planning, ablation, and A/B order independent.
+/// Wrapping integer arithmetic and fixed decimal emission make v1 reproducible.
+struct Random(u64);
+
+impl Random {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9e3779b97f4a7c15);
+        let mut value = self.0;
+        value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+        value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
+        value ^ (value >> 31)
+    }
+
+    fn choose(&mut self, count: usize) -> usize {
+        (self.next() % count as u64) as usize
+    }
+
+    fn between(&mut self, min: f64, max: f64) -> f64 {
+        let unit = (self.next() >> 11) as f64 / (1u64 << 53) as f64;
+        min + (max - min) * unit
+    }
+}
+
+pub fn comparison_pair(batch_seed: u64, index: usize) -> ComparisonPair {
+    let seed = Random(batch_seed.wrapping_add(index as u64)).next();
+    let coordinated = DesignPlan::coordinated(seed);
+    let independent = coordinated.ablate();
+    let (a, b) = if Random(seed ^ 0x61625f6f72646572).choose(2) == 0 {
+        (coordinated, independent)
+    } else {
+        (independent, coordinated)
+    };
+    ComparisonPair { seed, a, b }
+}
+
+impl DesignPlan {
+    fn coordinated(seed: u64) -> Self {
+        let mut random = Random(seed);
+        let rotation = random.between(-45.0, 45.0);
+        let frequency = random.between(1.8, 3.8);
+        let phase = random.between(-90.0, 90.0);
+        let anchor = [random.between(0.25, 0.6), random.between(-0.3, 0.3)];
+        let palette = random.choose(PALETTES.len());
+        let composition = [
+            Composition::Weave,
+            Composition::Layers,
+            Composition::Modulate,
+        ][random.choose(3)];
+        let crossing = [60.0, 90.0, 120.0][random.choose(3)];
+        let second_harmonic = [3, 4][random.choose(2)];
+        let ring_count = 1 + random.choose(3);
+        let mut motifs = vec![
+            Motif {
+                kind: MotifKind::Stripe,
+                orientation: Orientation::Relative(0.0),
+                scale: Scale::Ratio(2, 1),
+                placement: Placement::Origin,
+                phase: Phase::Shared,
+                weight: random.between(0.5, 0.9),
+            },
+            Motif {
+                kind: MotifKind::Stripe,
+                orientation: Orientation::Relative(crossing),
+                scale: Scale::Ratio(second_harmonic, 1),
+                placement: Placement::Origin,
+                phase: Phase::Offset(90.0),
+                weight: random.between(0.5, 0.9),
+            },
+        ];
+        for index in 0..ring_count {
+            motifs.push(Motif {
+                kind: MotifKind::Ring,
+                orientation: Orientation::Relative(0.0),
+                scale: [Scale::Ratio(1, 1), Scale::Ratio(1, 2), Scale::Ratio(3, 2)][index],
+                placement: [Placement::Anchor, Placement::Mirror, Placement::Origin][index],
+                phase: if index == 1 {
+                    Phase::Offset(180.0)
+                } else {
+                    Phase::Shared
+                },
+                weight: random.between(0.4, 0.8),
+            });
+        }
+        Self {
+            seed,
+            condition: Condition::Coordinated,
+            rotation,
+            frequency,
+            phase,
+            anchor,
+            palette,
+            composition,
+            motifs,
+        }
+    }
+
+    fn ablate(&self) -> Self {
+        let mut plan = self.clone();
+        plan.condition = Condition::Independent;
+        let mut random = Random(self.seed ^ 0x61626c6174696f6e);
+        for motif in &mut plan.motifs {
+            motif.orientation = Orientation::Independent(random.between(-180.0, 180.0));
+            // Retain the fine/coarse role, remove harmonic relationships.
+            motif.scale = Scale::Independent(match motif.kind {
+                MotifKind::Stripe => random.between(2.0, 4.0),
+                MotifKind::Ring => random.between(0.5, 1.5),
+            });
+            motif.placement =
+                Placement::Independent([random.between(-0.6, 0.6), random.between(-0.6, 0.6)]);
+            motif.phase = Phase::Independent(random.between(-180.0, 180.0));
+        }
+        plan
+    }
+
+    /// The emitted comments record the high-level choices; the declarations are
+    /// their executable lowering. No generator is needed to load this artifact.
+    pub fn source(&self) -> String {
+        let mut source = format!(
+            r#"// generator: {GENERATOR_VERSION}
+// pair seed: {}
+// condition: {}
+// composition: {}
+// anchor: ({:.4}, {:.4}); palette: {}
+// All motifs share scene rotation, base frequency, and a phase control.
+// The independent condition removes constraints on their relative choices.
+starfish 1;
+program "Study {}" @id("study-{}") {{
+    param rotation: Angle = {:.4}deg in -180deg..180deg step 0.5deg;
+    param frequency: Frequency = {:.4} in 0.2..8 step 0.05;
+    param phase: Angle = {:.4}deg in -180deg..180deg step 0.5deg;
+    frame shared = rotate(world, rotation);
+    axis primary = vec2(1, 0);
+
+    component stripe(p: Field<Point2>, axis: Vec2, scale: Scalar,
+                     frequency: Frequency, phase: Angle) -> Field<Scalar> =
+        wave(scale * dot(p, axis), frequency, phase);
+    component ring(p: Field<Point2>, scale: Scalar,
+                   frequency: Frequency, phase: Angle) -> Field<Scalar> =
+        wave(scale * length(p), frequency, phase);
+"#,
+            self.seed,
+            self.condition.name(),
+            self.composition.name(),
+            self.anchor[0],
+            self.anchor[1],
+            self.palette,
+            self.seed,
+            self.seed,
+            self.rotation,
+            self.frequency,
+            self.phase,
+        );
+        for (index, motif) in self.motifs.iter().enumerate() {
+            let angle = match motif.orientation {
+                Orientation::Relative(value) | Orientation::Independent(value) => value,
+            };
+            let scale = match motif.scale {
+                Scale::Ratio(numerator, denominator) => numerator as f64 / denominator as f64,
+                Scale::Independent(value) => value,
+            };
+            let center = match motif.placement {
+                Placement::Origin => [0.0, 0.0],
+                Placement::Anchor => self.anchor,
+                Placement::Mirror => [-self.anchor[0], -self.anchor[1]],
+                Placement::Independent(value) => value,
+            };
+            let offset = match motif.phase {
+                Phase::Shared => 0.0,
+                Phase::Offset(value) | Phase::Independent(value) => value,
+            };
+            writeln!(source, "\n    // motif {index}: {}; orientation {:?}; scale {:?}; placement {:?}; phase {:?}",
+                motif.kind.name(), motif.orientation, motif.scale, motif.placement, motif.phase).unwrap();
+            writeln!(
+                source,
+                "    param scale_{index}: Scalar = {scale:.4} in 0.25..5 step 0.01;"
+            )
+            .unwrap();
+            writeln!(
+                source,
+                "    param weight_{index}: Scalar = {:.4} in 0..2 step 0.01;",
+                motif.weight
+            )
+            .unwrap();
+            writeln!(
+                source,
+                "    frame oriented_{index} = rotate(shared, {angle:.4}deg);"
+            )
+            .unwrap();
+            writeln!(
+                source,
+                "    frame placed_{index} = oriented_{index} - point2({:.4}, {:.4});",
+                center[0], center[1]
+            )
+            .unwrap();
+            let axis_argument = if motif.kind == MotifKind::Stripe {
+                "primary, "
+            } else {
+                ""
+            };
+            writeln!(source, "    field motif_{index}: Scalar = {}(placed_{index}, {axis_argument}scale_{index}, frequency, phase + {offset:.4}deg);", motif.kind.name()).unwrap();
+            writeln!(
+                source,
+                "    field layer_{index}: Scalar = weight_{index} * motif_{index};"
+            )
+            .unwrap();
+        }
+        let rings = (2..self.motifs.len())
+            .map(|i| format!("layer_{i}"))
+            .collect::<Vec<_>>()
+            .join(" + ");
+        let expression = match self.composition {
+            Composition::Weave => format!("layer_0 * layer_1 + {rings}"),
+            Composition::Layers => format!("layer_0 + layer_1 + {rings}"),
+            Composition::Modulate => format!("(layer_0 + layer_1) * ({rings})"),
+        };
+        writeln!(
+            source,
+            "\n    field composition: Scalar = tanh({expression});"
+        )
+        .unwrap();
+        source.push_str("    palette ink = smooth [\n");
+        for (index, [red, green, blue]) in PALETTES[self.palette].iter().enumerate() {
+            writeln!(
+                source,
+                "        rgb({red:.4}, {green:.4}, {blue:.4}){}",
+                if index == 4 { "" } else { "," }
+            )
+            .unwrap();
+        }
+        source.push_str("    ];\n    output image: Field<Color> = palette(ink, composition);\n}\n");
+        source
+    }
+}
+
+const PALETTES: [[[f64; 3]; 5]; 4] = [
+    [
+        [0.035, 0.065, 0.13],
+        [0.055, 0.32, 0.39],
+        [0.36, 0.69, 0.65],
+        [0.95, 0.86, 0.62],
+        [0.83, 0.27, 0.20],
+    ],
+    [
+        [0.06, 0.035, 0.12],
+        [0.24, 0.13, 0.37],
+        [0.62, 0.34, 0.47],
+        [0.91, 0.70, 0.47],
+        [0.98, 0.91, 0.73],
+    ],
+    [
+        [0.025, 0.08, 0.09],
+        [0.10, 0.24, 0.20],
+        [0.38, 0.55, 0.30],
+        [0.85, 0.83, 0.48],
+        [0.99, 0.96, 0.84],
+    ],
+    [
+        [0.07, 0.05, 0.06],
+        [0.29, 0.16, 0.12],
+        [0.65, 0.32, 0.18],
+        [0.88, 0.62, 0.39],
+        [0.98, 0.91, 0.77],
+    ],
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        program::{ParameterBindings, StarfishProgram, Type},
+        render::{RenderRequest, render},
+    };
+
+    #[test]
+    fn version_one_random_stream_has_fixed_values() {
+        let mut random = Random(0);
+        assert_eq!(random.next(), 0xe220a8397b1dcdaf);
+        assert_eq!(random.next(), 0x6e789e6aa1b965f4);
+    }
+
+    #[test]
+    fn pairs_compile_reproduce_and_preserve_field_budgets() {
+        let mut structures = std::collections::HashSet::new();
+        let mut orders = std::collections::HashSet::new();
+        for seed in (0..64).chain([u64::MAX]) {
+            let pair = comparison_pair(seed, 0);
+            let repeated = comparison_pair(seed, 0);
+            assert_eq!(pair.a.source(), repeated.a.source());
+            assert_eq!(pair.b.source(), repeated.b.source());
+            assert_ne!(pair.a.condition, pair.b.condition);
+            orders.insert(pair.a.condition.name());
+            structures.insert((pair.a.composition.name(), pair.a.motifs.len()));
+            let a = StarfishProgram::from_source(&pair.a.source()).unwrap();
+            let b = StarfishProgram::from_source(&pair.b.source()).unwrap();
+            let signature = |program: &StarfishProgram| {
+                program
+                    .nodes
+                    .iter()
+                    .filter(|node| {
+                        matches!(
+                            node.ty,
+                            Type::FieldPoint | Type::FieldScalar | Type::FieldColor
+                        )
+                    })
+                    .map(|node| (node.ty, std::mem::discriminant(&node.operation)))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(signature(&a), signature(&b));
+            assert_eq!(
+                a.items.iter().map(|item| &item.id).collect::<Vec<_>>(),
+                b.items.iter().map(|item| &item.id).collect::<Vec<_>>()
+            );
+            assert_eq!(a.palettes[0].stops, b.palettes[0].stops);
+            let preview = |program: &StarfishProgram| {
+                render(
+                    program,
+                    &ParameterBindings::defaults(program),
+                    RenderRequest {
+                        output: &program.output,
+                        width: 24,
+                        height: 24,
+                    },
+                )
+                .unwrap()
+                .rgba
+            };
+            let image = preview(&a);
+            assert_eq!(
+                image,
+                preview(&StarfishProgram::from_source(&repeated.a.source()).unwrap())
+            );
+            assert_ne!(image, preview(&b));
+            assert!(image.chunks_exact(4).any(|pixel| pixel != &image[..4]));
+        }
+        assert_eq!(orders.len(), 2);
+        assert_eq!(structures.len(), 9);
+    }
+
+    #[test]
+    fn generated_motifs_follow_shared_rotation() {
+        use crate::evaluate::Evaluator;
+        let source = DesignPlan::coordinated(42).source();
+        let program = StarfishProgram::from_source(&source).unwrap();
+        let rotation = program
+            .parameters
+            .iter()
+            .position(|p| p.id == "rotation")
+            .unwrap();
+        let mut base = ParameterBindings::defaults(&program);
+        base.0[rotation] = 0.0;
+        let mut rotated = base.clone();
+        rotated.0[rotation] = 90.0_f32.to_radians();
+        for item in program
+            .items
+            .iter()
+            .filter(|item| item.ty == Type::FieldScalar)
+        {
+            let expected = Evaluator::new(&program, &base, &item.id)
+                .unwrap()
+                .sample(0.37, 0.21);
+            let actual = Evaluator::new(&program, &rotated, &item.id)
+                .unwrap()
+                .sample(0.21, -0.37);
+            let (crate::evaluate::Value::Scalar(expected), crate::evaluate::Value::Scalar(actual)) =
+                (expected, actual)
+            else {
+                panic!("scalar field");
+            };
+            assert!((expected - actual).abs() < 1e-5, "{}", item.id);
+        }
+    }
+}

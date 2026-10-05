@@ -24,9 +24,9 @@ pub struct Studio {
 }
 
 impl Studio {
-    pub fn new(cc: &eframe::CreationContext<'_>, program: StarfishProgram, path: String) -> Self {
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
-        cc.egui_ctx.style_mut(|style| {
+    pub fn new(ctx: &egui::Context, program: StarfishProgram, path: String) -> Self {
+        ctx.set_visuals(egui::Visuals::dark());
+        ctx.style_mut(|style| {
             style.spacing.item_spacing = egui::vec2(8.0, 8.0);
             style.visuals.selection.bg_fill = Color32::from_rgb(40, 87, 93);
             style.visuals.selection.stroke.color = Color32::from_rgb(211, 240, 230);
@@ -47,6 +47,13 @@ impl Studio {
             path: path.clone(),
             path_input: path,
         }
+    }
+
+    pub fn show(&mut self, ctx: &egui::Context) {
+        self.output_list(ctx);
+        self.inspector(ctx);
+        self.rerender(ctx);
+        self.preview(ctx);
     }
 
     fn open(&mut self, path: &str) {
@@ -391,9 +398,6 @@ impl Studio {
 
 impl eframe::App for Studio {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.output_list(ctx);
-        self.inspector(ctx);
-        self.rerender(ctx);
-        self.preview(ctx);
+        self.show(ctx);
     }
 }

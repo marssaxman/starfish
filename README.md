@@ -41,6 +41,35 @@ cargo run -- render programs/crosscurrent.sf fine /tmp/fine.ppm 512 512
 `fine` selects an intermediate. Width and height default to 512 if omitted.
 The files use binary PPM (P6) to keep the CLI independent of image libraries.
 
+## Generate a comparison study
+
+```sh
+cargo run -- generate generated/study-42
+cargo run -- gallery generated/study-42
+```
+
+The first command creates twelve reproducible A/B pairs with batch seed 42.
+The output directory must be new. Each pair includes two self-contained `.sf`
+programs and their 256 × 256 PPM previews. The native gallery displays the
+images with shuffled A/B labels; click an image or **Inspect** to open its
+fields, source, and sliders in Studio. **Back to pairs** returns to the gallery.
+The conditions are revealed in source comments and `answers.tsv`.
+
+Within a pair, one program uses related orientations, harmonic scales, phase
+offsets, and planned placements; the other samples those choices independently.
+Both use the same motif structure, composition, weights, palette, and number of
+field operations. Across pairs, motif count and composition also vary.
+
+To choose another seed or pair count:
+
+```sh
+cargo run -- generate generated/study-123 123 12
+cargo run -- generated/study-123/pair-01-a.sf
+```
+
+See [the generator experiment](docs/GENERATION.md) for the design plan,
+reproduction rules, and what the comparison controls.
+
 See [the language guide](docs/LANGUAGE.md) for syntax and semantics. The source
 file is the authored artifact. The compiler retains named declarations and
 component definitions for inspection while lowering them to a validated graph
@@ -57,14 +86,16 @@ cargo test
 
 Tests cover parsing and validation, both saved programs, deterministic wave
 behavior, changed bindings, shared rotation, grayscale intermediate rendering,
-the final color output, and invalid render requests.
+the final color output, invalid render requests, reproducible generated pairs,
+matched field-operation budgets, and batch/gallery loading.
 
 ## Current scope
 
 The language deliberately has a small field vocabulary: coordinate transforms,
 waves, arithmetic, composition, and palettes. It supports typed reusable
-components and named frames, but no imports, loops, recursive components,
-source editor, graphical editing, generator, persistence of slider presets,
+components and named frames, plus a small deterministic composition generator.
+It has no imports, loops, recursive components, source editor, graphical editing,
+persistence of slider presets,
 or linear/Bézier elements yet. The latter can become new structured
 components and field operations without changing the program/render boundary.
 
