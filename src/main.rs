@@ -3,12 +3,15 @@
 mod bezier;
 mod comparison;
 mod evaluate;
+mod explorer;
 mod gallery;
 mod generate;
 mod program;
 mod render;
+mod session;
 mod source;
 mod studio;
+mod variation;
 
 use std::{env, fs, path::Path};
 
@@ -28,16 +31,53 @@ fn run() -> Result<(), String> {
         [] => launch(
             StarfishProgram::from_source(include_str!("../programs/curve_textures.sf"))?,
             "programs/curve_textures.sf".to_owned(),
+            true,
         ),
         [flag] if flag == "--help" || flag == "-h" => {
             println!(
-                "Usage:\n  starfish-studio [studio] [program.sf]\n  starfish-studio render program.sf output-id image.ppm [width height]\n  starfish-studio generate directory [seed [pairs]]\n  starfish-studio gallery directory\n\nGeneration defaults: seed 42, 12 pairs. The output directory must be new."
+                "Usage:\n  starfish-studio [studio] [program.sf]\n  starfish-studio render program.sf output-id image.ppm [width height]\n  starfish-studio generate directory [seed [pairs]]\n  starfish-studio gallery directory\n  starfish-studio vary program.sf session-directory [seed [pairs]]\n  starfish-studio explore session-directory\n\nGeneration defaults: seed 42, 12 pairs. The output directory must be new.\nVariation defaults: seed 42, 6 pairs, texture changes only.\nStudio exploration defaults to explorations/default; explore resumes a named session."
             );
             Ok(())
         }
-        [path] => launch(load(path)?, path.clone()),
-        [command, path] if command == "studio" => launch(load(path)?, path.clone()),
+        [path] => launch(load(path)?, path.clone(), false),
+        [command, path] if command == "studio" => launch(load(path)?, path.clone(), false),
         [command, directory] if command == "gallery" => launch_gallery(directory),
+        [command, directory] if command == "explore" => launch_exploration(directory),
+        [command, path, directory, options @ ..] if command == "vary" => {
+            let (seed, count) =
+                match options {
+                    [] => (42, 6),
+                    [seed] => (parse_seed(seed)?, 6),
+                    [seed, count] => (
+                        parse_seed(seed)?,
+                        count
+                            .parse::<usize>()
+                            .map_err(|_| "Pair count must be an integer")?,
+                    ),
+                    _ => return Err(
+                        "Usage: starfish-studio vary program.sf session-directory [seed [pairs]]"
+                            .into(),
+                    ),
+                };
+            if !(1..=12).contains(&count) {
+                return Err("Choose between 1 and 12 variation pairs".into());
+            }
+            let program = load(path)?;
+            let snapshot = variation::Snapshot::capture(
+                &program,
+                &ParameterBindings::defaults(&program),
+                &program.output,
+            )?;
+            let store = session::Session::open(Path::new(directory))?;
+            let parent = store.save(&snapshot, None)?;
+            store.visit(&parent.id)?;
+            let round = store.vary(&parent.id, seed, count, variation::Settings::default())?;
+            store.view_round(&round.id)?;
+            println!(
+                "Generated {count} variation pairs in {directory} (seed {seed}).\nExplore with: cargo run -- explore {directory}"
+            );
+            Ok(())
+        }
         [command, directory, options @ ..] if command == "generate" => {
             let (seed, count) = match options {
                 [] => (comparison::DEFAULT_SEED, comparison::DEFAULT_PAIRS),
@@ -119,7 +159,7 @@ fn render_file(
     Ok(())
 }
 
-fn launch(program: StarfishProgram, path: String) -> Result<(), String> {
+fn launch(program: StarfishProgram, path: String, resume: bool) -> Result<(), String> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 780.0])
@@ -130,9 +170,41 @@ fn launch(program: StarfishProgram, path: String) -> Result<(), String> {
     eframe::run_native(
         "Starfish Studio",
         options,
-        Box::new(move |cc| Ok(Box::new(studio::Studio::new(&cc.egui_ctx, program, path)))),
+        Box::new(move |cc| {
+            let root = std::path::PathBuf::from(explorer::DEFAULT_SESSION);
+            let explorer = if resume {
+                explorer::Explorer::resume(&cc.egui_ctx, program, path, root)
+            } else {
+                explorer::Explorer::new(&cc.egui_ctx, program, path, root)
+            };
+            Ok(Box::new(explorer))
+        }),
     )
     .map_err(|e| e.to_string())
+}
+
+fn launch_exploration(directory: &str) -> Result<(), String> {
+    let root = std::path::PathBuf::from(directory);
+    session::Session::open(&root)?;
+    let program = StarfishProgram::from_source(include_str!("../programs/curve_textures.sf"))?;
+    let options = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default().with_inner_size([1200.0, 850.0]),
+        renderer: eframe::Renderer::Glow,
+        ..Default::default()
+    };
+    eframe::run_native(
+        "Starfish Exploration",
+        options,
+        Box::new(move |cc| {
+            Ok(Box::new(explorer::Explorer::resume(
+                &cc.egui_ctx,
+                program,
+                "programs/curve_textures.sf".into(),
+                root,
+            )))
+        }),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn launch_gallery(directory: &str) -> Result<(), String> {

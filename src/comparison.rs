@@ -146,6 +146,8 @@ pub fn write_batch(directory: &Path, seed: u64, count: usize) -> Result<(), Stri
              A/B order is shuffled deterministically; pairs.tsv contains neutral source filenames.\n\
              Browse with: cargo run -- gallery <this directory>\n\
              Compare A and B before inspecting source or opening answers.tsv.\n\
+             A/B, Both, and Neither judgments are saved with program snapshots in feedback/.\n\
+             Inspect a candidate to keep edits, make variations, and browse exploration history.\n\
              Each .sf is self-contained and includes generator provenance and its explicit plan.\n\
              Each .ppm is a {PREVIEW_SIZE} x {PREVIEW_SIZE} preview from the existing CPU renderer.\n\n\
              In Studio, enable Curve guides to see the paths; select a curve and drag its points.\n\

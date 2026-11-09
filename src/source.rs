@@ -1,6 +1,7 @@
 //! A small, versioned Starfish source language. The parser retains named structure.
 
 use crate::program::{DefinitionKind, Type};
+use std::ops::Range;
 
 #[derive(Clone, Debug)]
 pub enum Expr {
@@ -20,6 +21,7 @@ pub struct ParameterDecl {
     pub min: f32,
     pub max: f32,
     pub step: f32,
+    pub initial_span: Range<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -30,6 +32,7 @@ pub struct Definition {
     pub annotated_type: Option<Type>,
     pub expr: Expr,
     pub expression: String,
+    pub expression_span: Range<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -53,6 +56,7 @@ pub struct PaletteDecl {
     pub name: String,
     pub id: String,
     pub stops: Vec<[f32; 3]>,
+    pub stop_spans: Vec<Range<usize>>,
 }
 
 #[derive(Clone, Debug)]
@@ -214,6 +218,22 @@ pub fn parse(source: &str) -> Result<ParsedProgram, String> {
     .program()
 }
 
+/// Token ranges, so edits never rewrite comments or parts of longer identifiers.
+pub fn call_spans(source: &str, names: &[&str]) -> Result<Vec<(Range<usize>, String)>, String> {
+    Ok(lex(source)?
+        .windows(2)
+        .filter_map(|pair| match &pair[0].kind {
+            TokenKind::Ident(name)
+                if names.contains(&name.as_str())
+                    && matches!(pair[1].kind, TokenKind::Symbol('(')) =>
+            {
+                Some((pair[0].start..pair[0].end, name.clone()))
+            }
+            _ => None,
+        })
+        .collect())
+}
+
 impl Parser<'_> {
     fn current(&self) -> &TokenKind {
         &self.tokens[self.at].kind
@@ -368,7 +388,9 @@ impl Parser<'_> {
                 self.expect_symbol(':')?;
                 let ty = self.ty()?;
                 self.expect_symbol('=')?;
+                let start = self.tokens[self.at].start;
                 let initial = self.signed_number(ty)?;
+                let initial_span = start..self.tokens[self.at - 1].end;
                 self.expect_keyword("in")?;
                 let min = self.signed_number(ty)?;
                 if !matches!(self.current(), TokenKind::Range) {
@@ -393,6 +415,7 @@ impl Parser<'_> {
                     min,
                     max,
                     step,
+                    initial_span,
                 }))
             }
             "frame" | "axis" | "field" | "output" => {
@@ -423,6 +446,7 @@ impl Parser<'_> {
                     annotated_type,
                     expr,
                     expression: self.source[start..end].trim().to_owned(),
+                    expression_span: start..end,
                 }))
             }
             "component" => {
@@ -470,7 +494,9 @@ impl Parser<'_> {
                 self.expect_keyword("smooth")?;
                 self.expect_symbol('[')?;
                 let mut stops = Vec::new();
+                let mut stop_spans = Vec::new();
                 loop {
+                    let start = self.tokens[self.at].start;
                     self.expect_keyword("rgb")?;
                     self.expect_symbol('(')?;
                     let r = self.signed_number(Type::Scalar)?;
@@ -479,6 +505,7 @@ impl Parser<'_> {
                     self.expect_symbol(',')?;
                     let b = self.signed_number(Type::Scalar)?;
                     self.expect_symbol(')')?;
+                    stop_spans.push(start..self.tokens[self.at - 1].end);
                     stops.push([r, g, b]);
                     if self.symbol(']') {
                         break;
@@ -486,7 +513,12 @@ impl Parser<'_> {
                     self.expect_symbol(',')?;
                 }
                 self.expect_symbol(';')?;
-                Ok(Decl::Palette(PaletteDecl { name, id, stops }))
+                Ok(Decl::Palette(PaletteDecl {
+                    name,
+                    id,
+                    stops,
+                    stop_spans,
+                }))
             }
             _ => Err(self.error(&format!("Unknown declaration kind: {kind}"))),
         }

@@ -50,6 +50,9 @@ A `param` declares a runtime binding, its default, and its slider range:
 
 The default must be within the range, and the step must be positive. Slider
 changes update a separate binding vector. They do not rewrite source.
+**Keep image** makes a new source snapshot with the current bindings as parameter
+defaults. The original file and declared final output remain intact; the selected
+preview output is recorded separately in the exploration session.
 
 ## Declarations and expressions
 

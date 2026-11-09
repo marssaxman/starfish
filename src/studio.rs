@@ -5,6 +5,7 @@ use crate::{
     program::{DefinitionKind, ParameterBindings, StarfishProgram, Type, display_name},
     render::{self, RenderRequest},
     source::Decl,
+    variation::Snapshot,
 };
 use eframe::egui::{self, Color32, RichText};
 
@@ -30,6 +31,22 @@ pub struct Studio {
 }
 
 impl Studio {
+    pub fn snapshot(&self) -> Result<Snapshot, String> {
+        Snapshot::capture(&self.program, &self.bindings, &self.selected)
+    }
+
+    pub fn source(&self) -> &str {
+        &self.program.source
+    }
+
+    pub fn select_output(&mut self, output: &str) -> Result<(), String> {
+        crate::evaluate::Evaluator::new(&self.program, &self.bindings, output)?;
+        self.selected = output.to_owned();
+        self.inspected = output.to_owned();
+        self.dirty = true;
+        Ok(())
+    }
+
     pub fn new(ctx: &egui::Context, program: StarfishProgram, path: String) -> Self {
         ctx.set_visuals(egui::Visuals::dark());
         ctx.style_mut(|style| {
@@ -280,6 +297,7 @@ impl Studio {
                                             parameter.min.to_degrees()..=parameter.max.to_degrees(),
                                         )
                                         .step_by(parameter.step.to_degrees() as f64)
+                                        .clamping(egui::SliderClamping::Edits)
                                         .suffix("°")
                                         .max_decimals(2),
                                     )
@@ -297,6 +315,7 @@ impl Studio {
                                             parameter.min..=parameter.max,
                                         )
                                         .step_by(parameter.step as f64)
+                                        .clamping(egui::SliderClamping::Edits)
                                         .max_decimals(2),
                                     )
                                     .changed();

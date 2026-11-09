@@ -14,7 +14,7 @@ cargo run
 cargo run -- programs/crosscurrent.sf
 ```
 
-The first command opens [Curve texture study](programs/curve_textures.sf), a
+With a new session, the first command opens [Curve texture study](programs/curve_textures.sf), a
 pair of related cubic curves shaping interacting wave fields. The second
 opens [Crosscurrent](programs/crosscurrent.sf). In the left pane, type a source
 path and press **Open**, or use the sample buttons. An invalid file leaves
@@ -24,6 +24,27 @@ declared color output. The right pane shows the field expression, its direct
 dependencies, program source, and live parameter bindings.
 Frames, axes, and component definitions in the left pane can also be selected
 for inspection while the image preview stays on the last selected field.
+
+**Keep image** saves the current image, including curve edits and slider values.
+Choose features under **Vary**, then click **Make variations** to compare relatives.
+The default changes textures while holding gestures, palettes, and composition
+fixed. Choose **A**, **B**, **Both**, or **Neither**; judgments are saved
+automatically. Inspect a result to edit it, keep it, or branch again.
+**Regenerate** reruns the displayed batch from the same parents with the current
+settings.
+**Explore picks** makes the next round from your A/B selections, retaining both
+families for **Both** and skipping **Neither**.
+**History** reopens saved images and comparison rounds, including earlier branches.
+
+Studio saves this work in `explorations/default` and resumes the last saved image
+or comparison when launched without a source path. For a named session:
+
+```sh
+cargo run -- explore explorations/my-session
+```
+
+See [the exploration guide](docs/EXPLORATION.md) for saving, variation settings,
+preference records, and reproducibility.
 
 Enable **Curve guides** above the image to see the paths and control handles.
 Choose a curve from the adjacent menu and drag its points. Guides follow shared
@@ -88,6 +109,8 @@ programs and their 256 × 256 PPM previews. The native gallery displays the
 images with shuffled A/B labels; click an image or **Inspect** to open its
 fields, source, and sliders in Studio. **Back to pairs** returns to the gallery.
 The conditions are revealed in source comments and `answers.tsv`.
+The **A**, **B**, **Both**, and **Neither** controls save judgments and immutable
+copies of the compared programs in the study's `feedback/` session.
 
 Within a pair, one program varies a common curve gesture with related orientations,
 harmonic scales, phase offsets, and planned placements; the other samples gestures
@@ -129,6 +152,9 @@ Curve checks include straight and curved coordinates, an independent dense
 reference, finite endpoints, collapsed handles, shared rotation, live controls,
 visible variation throughout the image, transformed guides, handle dragging,
 shared gesture editing, and restoration of full preview resolution after a drag.
+Exploration checks cover exact saved bindings and pixels, locked variation groups,
+reproduction, preference corrections, history, and the complete keep/compare/vote/
+inspect/resume workflow through the UI.
 
 ## Current scope
 
@@ -139,7 +165,8 @@ modulation. It supports
 typed reusable components and named frames, plus a small deterministic
 composition generator.
 It has no imports, loops, recursive components, source editor, graph editor,
-persistence of slider presets, or multi-segment paths yet.
+or multi-segment paths yet. Exploration snapshots preserve current bindings as
+source defaults; there is no separate preset system.
 Bézier curves currently enter through four uniform control points and expose
 along/across coordinates through the existing field and component model.
 

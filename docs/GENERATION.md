@@ -122,7 +122,9 @@ Useful questions are whether motifs recur recognizably, whether distant areas
 feel related, whether fine texture supports the larger sweeps, whether several
 scales coexist, and whether inspecting the program explains something about its
 image. A/B assignment is shuffled per pair; neither position identifies a
-condition. The gallery does not record preferences or train a model.
+condition. The gallery records preference judgments with snapshots in the study's
+`feedback/` session. These comparison records are marked separately from local
+variation rounds. See [the exploration guide](EXPLORATION.md).
 
 ## Artifacts and reproduction
 
