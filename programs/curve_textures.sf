@@ -1,0 +1,66 @@
+starfish 1;
+program "Curve texture study" @id("curve-texture-study") {
+    param rotation: Angle = -12deg in -180deg..180deg step 0.5deg;
+    param frequency: Frequency = 2.8 in 0.2..8 step 0.05;
+    param phase: Angle = 15deg in -180deg..180deg step 0.5deg;
+    param bend: Scalar = 0.95 in 0..1.8 step 0.01;
+    param texture_amount: Scalar = 0.6 in 0..1 step 0.01;
+    param texture_scale: Scalar = 3.8 in 1..6 step 0.05;
+    param crossing: Angle = 60deg in -180deg..180deg step 0.5deg;
+    param spread: Scalar = 0.3 in -0.8..0.8 step 0.01;
+
+    param start_x: Scalar = -0.75 in -1.6..1.6 step 0.01;
+    param start_y: Scalar = -0.5 in -1.6..1.6 step 0.01;
+    param handle_a_x: Scalar = -0.35 in -1.8..1.8 step 0.01;
+    param handle_a_y: Scalar = 0.65 in -1.8..1.8 step 0.01;
+    param handle_b_x: Scalar = 0.35 in -1.8..1.8 step 0.01;
+    param handle_b_y: Scalar = -0.65 in -1.8..1.8 step 0.01;
+    param end_x: Scalar = 0.75 in -1.6..1.6 step 0.01;
+    param end_y: Scalar = 0.5 in -1.6..1.6 step 0.01;
+
+    // Both instances reuse one gesture. Dragging either curve changes the family.
+    component gesture(p: Field<Point2>) -> Field<Point2> =
+        bezier(p, point2(start_x, start_y), point2(handle_a_x, handle_a_y),
+               point2(handle_b_x, handle_b_y), point2(end_x, end_y));
+    frame shared = rotate(world, rotation);
+    frame echo_frame = rotate(shared, crossing) - point2(spread, 0);
+    frame curve = gesture(shared);
+    frame echo = gesture(echo_frame);
+    axis forward = vec2(1, 0);
+    axis sideways = vec2(0, 1);
+    field along: Scalar = dot(curve, forward);
+    field across: Scalar = dot(curve, sideways);
+    field distance: Scalar = abs(across);
+    field echo_distance: Scalar = abs(dot(echo, sideways));
+
+    // Distances bend global coordinates, keeping the whole plane patterned.
+    field sweep: Scalar = dot(shared, forward) + bend * distance;
+    field echo_sweep: Scalar = dot(echo_frame, forward) + bend * echo_distance;
+    field cross_coordinate: Scalar = distance + 0.25 * dot(shared, sideways);
+    field echo_cross: Scalar = echo_distance + 0.25 * dot(echo_frame, sideways);
+    field carrier: Scalar = wave(sweep, frequency, phase);
+    field echo_carrier: Scalar = triangle(1.5 * echo_sweep, frequency, phase + 90deg);
+
+    field etching: Scalar =
+        (0.65 + 0.35 * wave(0.5 * sweep, frequency, phase))
+        * wave(texture_scale * cross_coordinate
+               + 0.18 * wave(along, frequency, phase), frequency, phase);
+    field braiding: Scalar =
+        wave(texture_scale * echo_cross, frequency, phase + 90deg)
+        * wave(2 * echo_sweep + 0.16 * carrier, frequency, phase);
+    field ripples: Scalar =
+        0.75 * wave(texture_scale * cross_coordinate + 0.22 * carrier, frequency, phase)
+        + 0.25 * wave(2 * texture_scale * cross_coordinate, frequency, phase + 90deg);
+    field texture: Scalar = 0.3 * etching + 0.25 * braiding + 0.2 * ripples;
+    field composition: Scalar =
+        tanh(0.8 * carrier + 0.6 * echo_carrier + texture_amount * texture);
+
+    palette ink = smooth [
+        rgb(0.025, 0.06, 0.12),
+        rgb(0.04, 0.28, 0.35),
+        rgb(0.24, 0.58, 0.59),
+        rgb(0.92, 0.74, 0.42),
+        rgb(0.99, 0.95, 0.83)
+    ];
+    output image: Field<Color> = palette(ink, composition);
+}

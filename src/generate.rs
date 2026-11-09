@@ -3,7 +3,7 @@
 
 use std::fmt::Write;
 
-pub const GENERATOR_VERSION: &str = "starfish-waveforms-v2";
+pub const GENERATOR_VERSION: &str = "starfish-curves-v3";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Condition {
@@ -21,16 +21,18 @@ impl Condition {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum MotifKind {
-    Stripe,
-    Ring,
+enum Texture {
+    Etched,
+    Braided,
+    Rippled,
 }
 
-impl MotifKind {
+impl Texture {
     fn name(self) -> &'static str {
         match self {
-            Self::Stripe => "stripe",
-            Self::Ring => "ring",
+            Self::Etched => "etched",
+            Self::Braided => "braided",
+            Self::Rippled => "rippled",
         }
     }
 }
@@ -96,7 +98,8 @@ enum Phase {
 
 #[derive(Clone, Debug)]
 struct Motif {
-    kind: MotifKind,
+    points: [[f64; 2]; 4],
+    family_variation: Option<f64>,
     waveform: Waveform,
     detail: f64,
     orientation: Orientation,
@@ -133,6 +136,11 @@ pub struct DesignPlan {
     anchor: [f64; 2],
     palette: usize,
     composition: Composition,
+    gesture: [[f64; 2]; 4],
+    texture: Texture,
+    bend: f64,
+    texture_amount: f64,
+    texture_scale: f64,
     motifs: Vec<Motif>,
 }
 
@@ -181,7 +189,7 @@ impl DesignPlan {
     fn coordinated(seed: u64) -> Self {
         let mut random = Random(seed);
         let rotation = random.between(-45.0, 45.0);
-        let frequency = random.between(1.8, 3.8);
+        let frequency = random.between(1.4, 2.6);
         let phase = random.between(-90.0, 90.0);
         let anchor = [random.between(0.25, 0.6), random.between(-0.3, 0.3)];
         let palette = random.choose(PALETTES.len());
@@ -190,48 +198,47 @@ impl DesignPlan {
             Composition::Layers,
             Composition::Modulate,
         ][random.choose(3)];
-        let crossing = [60.0, 90.0, 120.0][random.choose(3)];
-        let second_harmonic = [3, 4][random.choose(2)];
-        let ring_count = 1 + random.choose(3);
-        let mut motifs = vec![
-            Motif {
-                kind: MotifKind::Stripe,
-                waveform: Waveform::Sine,
-                detail: 0.5,
-                orientation: Orientation::Relative(0.0),
-                scale: Scale::Ratio(2, 1),
-                placement: Placement::Origin,
-                phase: Phase::Shared,
-                weight: random.between(0.5, 0.9),
-            },
-            Motif {
-                kind: MotifKind::Stripe,
-                waveform: Waveform::Sine,
-                detail: 0.5,
-                orientation: Orientation::Relative(crossing),
-                scale: Scale::Ratio(second_harmonic, 1),
-                placement: Placement::Origin,
-                phase: Phase::Offset(90.0),
-                weight: random.between(0.5, 0.9),
-            },
-        ];
-        for index in 0..ring_count {
+        let crossing = [30.0, 60.0, 90.0][random.choose(3)];
+        let gesture = random_gesture(&mut random);
+        let count = 2 + random.choose(3);
+        let texture = [Texture::Etched, Texture::Braided, Texture::Rippled][random.choose(3)];
+        let bend = random.between(0.6, 1.3);
+        let texture_amount = random.between(0.3, 0.65);
+        let texture_scale = random.between(2.5, 4.5);
+        let mut motifs = Vec::new();
+        for index in 0..count {
+            let variation = [0.0, 0.18, -0.18, 0.32][index];
+            let mut points = gesture;
+            // A family retains the parent gesture while opening or tightening its bend.
+            points[1][1] += variation;
+            points[2][1] -= variation;
             motifs.push(Motif {
-                kind: MotifKind::Ring,
+                points,
+                family_variation: Some(variation),
                 waveform: Waveform::Sine,
                 detail: 0.5,
-                orientation: Orientation::Relative(0.0),
-                scale: [Scale::Ratio(1, 1), Scale::Ratio(1, 2), Scale::Ratio(3, 2)][index],
-                placement: [Placement::Anchor, Placement::Mirror, Placement::Origin][index],
-                phase: if index == 1 {
-                    Phase::Offset(180.0)
-                } else {
+                orientation: Orientation::Relative([0.0, crossing, -crossing, 180.0][index]),
+                scale: [
+                    Scale::Ratio(1, 1),
+                    Scale::Ratio(3, 2),
+                    Scale::Ratio(1, 2),
+                    Scale::Ratio(2, 1),
+                ][index],
+                placement: [
+                    Placement::Origin,
+                    Placement::Anchor,
+                    Placement::Mirror,
+                    Placement::Origin,
+                ][index],
+                phase: if index == 0 {
                     Phase::Shared
+                } else {
+                    Phase::Offset(90.0 * index as f64)
                 },
-                weight: random.between(0.4, 0.8),
+                weight: random.between(0.55, 0.9),
             });
         }
-        // Waveform exploration has its own stream so spatial plans stay familiar.
+        // Waveform choices have their own stream, separate from curve planning.
         let mut profiles = Random(seed ^ 0x77617665666f726d);
         let first = profiles.choose(Waveform::ALL.len());
         for (index, motif) in motifs.iter_mut().enumerate() {
@@ -247,6 +254,11 @@ impl DesignPlan {
             anchor,
             palette,
             composition,
+            gesture,
+            texture,
+            bend,
+            texture_amount,
+            texture_scale,
             motifs,
         }
     }
@@ -257,14 +269,17 @@ impl DesignPlan {
         let mut random = Random(self.seed ^ 0x61626c6174696f6e);
         for motif in &mut plan.motifs {
             motif.orientation = Orientation::Independent(random.between(-180.0, 180.0));
-            // Retain the fine/coarse role, remove harmonic relationships.
-            motif.scale = Scale::Independent(match motif.kind {
-                MotifKind::Stripe => random.between(2.0, 4.0),
-                MotifKind::Ring => random.between(0.5, 1.5),
-            });
+            let scale = match motif.scale {
+                Scale::Ratio(a, b) => a as f64 / b as f64,
+                Scale::Independent(value) => value,
+            };
+            // Retain each instance's broad scale band while dropping exact ratios.
+            motif.scale = Scale::Independent(random.between(scale * 0.8, scale * 1.2));
             motif.placement =
                 Placement::Independent([random.between(-0.6, 0.6), random.between(-0.6, 0.6)]);
             motif.phase = Phase::Independent(random.between(-180.0, 180.0));
+            motif.points = random_gesture(&mut random);
+            motif.family_variation = None;
         }
         plan
     }
@@ -277,17 +292,24 @@ impl DesignPlan {
 // pair seed: {}
 // condition: {}
 // composition: {}
+// texture: {}
+// family gesture: {:?}
 // anchor: ({:.4}, {:.4}); palette: {}
 // All motifs share scene rotation, base frequency, and a phase control.
 // Waveform kinds and their detail controls are identical within each pair.
+// Curves bend fields throughout the image; there are no coverage masks.
 // The independent condition removes constraints on their relative choices.
 starfish 1;
 program "Study {}" @id("study-{}") {{
     param rotation: Angle = {:.4}deg in -180deg..180deg step 0.5deg;
     param frequency: Frequency = {:.4} in 0.2..8 step 0.05;
     param phase: Angle = {:.4}deg in -180deg..180deg step 0.5deg;
+    param bend: Scalar = {:.4} in 0..1.8 step 0.01;
+    param texture_amount: Scalar = {:.4} in 0..1 step 0.01;
+    param texture_scale: Scalar = {:.4} in 1..6 step 0.05;
     frame shared = rotate(world, rotation);
     axis primary = vec2(1, 0);
+    axis sideways = vec2(0, 1);
 
     component harmonic(coordinate: Field<Scalar>, frequency: Frequency,
                        phase: Angle, detail: Scalar) -> Field<Scalar> =
@@ -302,6 +324,8 @@ program "Study {}" @id("study-{}") {{
             self.seed,
             self.condition.name(),
             self.composition.name(),
+            self.texture.name(),
+            self.gesture,
             self.anchor[0],
             self.anchor[1],
             self.palette,
@@ -310,6 +334,9 @@ program "Study {}" @id("study-{}") {{
             self.rotation,
             self.frequency,
             self.phase,
+            self.bend,
+            self.texture_amount,
+            self.texture_scale,
         );
         for (index, motif) in self.motifs.iter().enumerate() {
             let angle = match motif.orientation {
@@ -329,8 +356,14 @@ program "Study {}" @id("study-{}") {{
                 Phase::Shared => 0.0,
                 Phase::Offset(value) | Phase::Independent(value) => value,
             };
-            writeln!(source, "\n    // motif {index}: {} {}; orientation {:?}; scale {:?}; placement {:?}; phase {:?}",
-                motif.waveform.name(), motif.kind.name(), motif.orientation, motif.scale, motif.placement, motif.phase).unwrap();
+            writeln!(source, "\n    // motif {index}: {} curve; orientation {:?}; scale {:?}; placement {:?}; phase {:?}",
+                motif.waveform.name(), motif.orientation, motif.scale, motif.placement, motif.phase).unwrap();
+            writeln!(
+                source,
+                "    // family variation: {:?}; control points: {:?}",
+                motif.family_variation, motif.points
+            )
+            .unwrap();
             writeln!(
                 source,
                 "    param scale_{index}: Scalar = {scale:.4} in 0.25..5 step 0.01;"
@@ -353,13 +386,48 @@ program "Study {}" @id("study-{}") {{
                 center[0], center[1]
             )
             .unwrap();
-            let coordinate = match motif.kind {
-                MotifKind::Stripe => format!("dot(placed_{index}, primary)"),
-                MotifKind::Ring => format!("length(placed_{index})"),
-            };
+            for (slot, [x, y]) in motif.points.iter().enumerate() {
+                writeln!(
+                    source,
+                    "    param curve_{index}_p{slot}_x: Scalar = {x:.4} in -2..2 step 0.01;"
+                )
+                .unwrap();
+                writeln!(
+                    source,
+                    "    param curve_{index}_p{slot}_y: Scalar = {y:.4} in -2..2 step 0.01;"
+                )
+                .unwrap();
+            }
+            writeln!(source, "    frame curve_{index} = bezier(placed_{index},\n        point2(curve_{index}_p0_x, curve_{index}_p0_y), point2(curve_{index}_p1_x, curve_{index}_p1_y),\n        point2(curve_{index}_p2_x, curve_{index}_p2_y), point2(curve_{index}_p3_x, curve_{index}_p3_y));").unwrap();
             writeln!(
                 source,
-                "    field coordinate_{index}: Scalar = scale_{index} * {coordinate};"
+                "    field along_{index}: Scalar = dot(curve_{index}, primary);"
+            )
+            .unwrap();
+            writeln!(
+                source,
+                "    field across_{index}: Scalar = dot(curve_{index}, sideways);"
+            )
+            .unwrap();
+            writeln!(
+                source,
+                "    field distance_{index}: Scalar = abs(across_{index});"
+            )
+            .unwrap();
+            writeln!(source, "    field sweep_{index}: Scalar = dot(placed_{index}, primary) + bend * distance_{index};").unwrap();
+            writeln!(
+                source,
+                "    field coordinate_{index}: Scalar = scale_{index} * sweep_{index};"
+            )
+            .unwrap();
+            // Extend the cross coordinate beyond the curve's endpoints, and give fine
+            // lines a slow along-curve drift. Detail remains active across the plane.
+            writeln!(source, "    field cross_coordinate_{index}: Scalar = scale_{index} * (distance_{index} + 0.25 * dot(placed_{index}, sideways));").unwrap();
+            writeln!(source, "    field grain_{index}: Scalar = wave(texture_scale * cross_coordinate_{index} + 0.18 * wave(along_{index}, frequency, phase), frequency, phase + {offset:.4}deg);").unwrap();
+            writeln!(
+                source,
+                "    param detail_{index}: Scalar = {:.4} in 0..1 step 0.01;",
+                motif.detail
             )
             .unwrap();
             let (function, extra) = match motif.waveform {
@@ -376,30 +444,41 @@ program "Study {}" @id("study-{}") {{
                     ("pulse", format!(", width_{index}"))
                 }
                 Waveform::Harmonic | Waveform::Modulated => {
-                    writeln!(
-                        source,
-                        "    param detail_{index}: Scalar = {:.4} in 0..1 step 0.01;",
-                        motif.detail
-                    )
-                    .unwrap();
                     (motif.waveform.name(), format!(", detail_{index}"))
                 }
             };
-            writeln!(source, "    field motif_{index}: Scalar = {function}(coordinate_{index}, frequency, phase + {offset:.4}deg{extra});").unwrap();
+            writeln!(source, "    field motif_{index}: Scalar = {function}(coordinate_{index} + 0.05 * texture_amount * grain_{index}, frequency, phase + {offset:.4}deg{extra});").unwrap();
+            let texture = match self.texture {
+                Texture::Etched => format!(
+                    "(0.65 + 0.35 * wave(0.5 * coordinate_{index}, frequency, phase)) * grain_{index}"
+                ),
+                Texture::Braided => format!(
+                    "grain_{index} * wave(2 * coordinate_{index} + 0.16 * grain_{index}, frequency, phase + {offset:.4}deg)"
+                ),
+                Texture::Rippled => format!(
+                    "0.75 * wave(texture_scale * cross_coordinate_{index} + 0.22 * motif_{index}, frequency, phase) + 0.25 * wave(2 * texture_scale * cross_coordinate_{index}, frequency, phase + {offset:.4}deg)"
+                ),
+            };
+            writeln!(source, "    field texture_{index}: Scalar = {texture};").unwrap();
             writeln!(
                 source,
-                "    field layer_{index}: Scalar = weight_{index} * motif_{index};"
+                "    field layer_{index}: Scalar = weight_{index} * (motif_{index} + texture_amount * detail_{index} * texture_{index});"
             )
             .unwrap();
         }
-        let rings = (2..self.motifs.len())
+        let relatives = (2..self.motifs.len())
             .map(|i| format!("layer_{i}"))
             .collect::<Vec<_>>()
             .join(" + ");
+        let relatives = if relatives.is_empty() {
+            "0"
+        } else {
+            &relatives
+        };
         let expression = match self.composition {
-            Composition::Weave => format!("layer_0 * layer_1 + {rings}"),
-            Composition::Layers => format!("layer_0 + layer_1 + {rings}"),
-            Composition::Modulate => format!("(layer_0 + layer_1) * ({rings})"),
+            Composition::Weave => format!("layer_0 * layer_1 + 0.65 * ({relatives})"),
+            Composition::Layers => format!("layer_0 + layer_1 + {relatives}"),
+            Composition::Modulate => format!("(layer_0 + layer_1) * (0.6 + {relatives})"),
         };
         writeln!(
             source,
@@ -418,6 +497,27 @@ program "Study {}" @id("study-{}") {{
         source.push_str("    ];\n    output image: Field<Color> = palette(ink, composition);\n}\n");
         source
     }
+}
+
+fn random_gesture(random: &mut Random) -> [[f64; 2]; 4] {
+    let ys = [
+        [-0.65, -0.65, 0.65, 0.65],
+        [-0.1, 0.95, 0.95, -0.1],
+        [-0.55, 0.7, -0.7, 0.55],
+        [-0.4, -0.15, 0.15, 0.4],
+    ][random.choose(4)];
+    [
+        [-1.25, ys[0] + random.between(-0.12, 0.12)],
+        [
+            random.between(-0.9, -0.3),
+            ys[1] + random.between(-0.12, 0.12),
+        ],
+        [
+            random.between(0.3, 0.9),
+            ys[2] + random.between(-0.12, 0.12),
+        ],
+        [1.25, ys[3] + random.between(-0.12, 0.12)],
+    ]
 }
 
 const PALETTES: [[[f64; 3]; 5]; 4] = [
@@ -471,6 +571,7 @@ mod tests {
         let mut structures = std::collections::HashSet::new();
         let mut orders = std::collections::HashSet::new();
         let mut waveforms = std::collections::HashSet::new();
+        let mut textures = std::collections::HashSet::new();
         for seed in (0..64).chain([u64::MAX]) {
             let pair = comparison_pair(seed, 0);
             let repeated = comparison_pair(seed, 0);
@@ -479,9 +580,15 @@ mod tests {
             assert_ne!(pair.a.condition, pair.b.condition);
             orders.insert(pair.a.condition.name());
             structures.insert((pair.a.composition.name(), pair.a.motifs.len()));
+            textures.insert(pair.a.texture.name());
+            assert_eq!(pair.a.texture, pair.b.texture);
+            assert_eq!(pair.a.bend, pair.b.bend);
+            assert_eq!(pair.a.texture_amount, pair.b.texture_amount);
+            assert_eq!(pair.a.texture_scale, pair.b.texture_scale);
             for (a, b) in pair.a.motifs.iter().zip(&pair.b.motifs) {
                 assert_eq!(a.waveform, b.waveform);
                 assert_eq!(a.detail, b.detail);
+                assert_eq!(a.weight, b.weight);
                 waveforms.insert(a.waveform.name());
             }
             let a = StarfishProgram::from_source(&pair.a.source()).unwrap();
@@ -529,6 +636,57 @@ mod tests {
         assert_eq!(orders.len(), 2);
         assert_eq!(structures.len(), 9);
         assert_eq!(waveforms.len(), Waveform::ALL.len());
+        assert_eq!(textures.len(), 3);
+    }
+
+    #[test]
+    fn curve_families_preserve_the_parent_gesture_and_have_live_texture_controls() {
+        let plan = DesignPlan::coordinated(42);
+        let independent = plan.ablate();
+        for (motif, other) in plan.motifs.iter().zip(&independent.motifs) {
+            let mut expected = plan.gesture;
+            let variation = motif.family_variation.unwrap();
+            expected[1][1] += variation;
+            expected[2][1] -= variation;
+            assert_eq!(motif.points, expected);
+            assert!(other.family_variation.is_none());
+            assert_ne!(motif.points, other.points);
+        }
+        let program = StarfishProgram::from_source(&plan.source()).unwrap();
+        let bindings = ParameterBindings::defaults(&program);
+        let guides = crate::evaluate::curve_guides(&program, &bindings, &program.output).unwrap();
+        assert_eq!(guides.len(), plan.motifs.len());
+        assert!(
+            guides
+                .iter()
+                .all(|guide| (0..4).all(|slot| guide.editable(slot)))
+        );
+        let preview = |bindings: &ParameterBindings| {
+            render(
+                &program,
+                bindings,
+                RenderRequest {
+                    output: &program.output,
+                    width: 48,
+                    height: 48,
+                },
+            )
+            .unwrap()
+            .rgba
+        };
+        let original = preview(&bindings);
+        for id in [
+            "bend",
+            "texture_amount",
+            "texture_scale",
+            "detail_0",
+            "curve_0_p1_y",
+        ] {
+            let index = program.parameters.iter().position(|p| p.id == id).unwrap();
+            let mut changed = bindings.clone();
+            changed.0[index] = program.parameters[index].min;
+            assert_ne!(original, preview(&changed), "{id} has no visible effect");
+        }
     }
 
     #[test]

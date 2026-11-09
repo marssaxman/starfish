@@ -1,10 +1,10 @@
-# The waveform generator experiment
+# The curve-family generator experiment
 
 Generate a study and browse it in the native gallery:
 
 ```sh
-cargo run -- generate generated/waveforms-42
-cargo run -- gallery generated/waveforms-42
+cargo run -- generate generated/curves-42
+cargo run -- gallery generated/curves-42
 ```
 
 Defaults are batch seed 42 and twelve pairs. Optional arguments are a decimal
@@ -24,68 +24,105 @@ version-1 Starfish source. It does not render or write files. The batch command
 uses the existing compiler and CPU renderer; the native gallery is another client
 of the same APIs.
 
-A coordinated plan chooses a scene frame, a base frequency, a shared phase, an
-anchor, a palette, and a composition. It instantiates two stripes and one to three
-rings, with a waveform profile chosen for each motif:
+A coordinated plan chooses a scene frame, base frequency, shared phase, anchor,
+palette, composition, and a parent cubic gesture. It instantiates two to four
+relatives of that gesture:
 
-- Stripes use relative orientations of 0° and 60°, 90°, or 120°, at 2× and 3× or
-  4× the base frequency, with shared/quarter-turn phase offsets.
-- Rings use 1×, ½×, and optionally 1½× frequency scales. Their placements use the
-  anchor, its mirror, and the origin, depending on the number of ring instances.
-- Composition either multiplies the stripes and adds the rings, adds all layers,
-  or modulates the stripe sum with the ring sum. Instance weights are explicit.
+- Parent gestures come from four shapes: a sweep, an arch, an S bend, and a shallow
+  curve. Control coordinates vary within bounded ranges; their x coordinates
+  remain ordered to avoid tight loops in the initial vocabulary.
+- Each relative opens or tightens the parent's two handles. These concrete control
+  points and the family variation remain in the plan and source comments.
+- Orientations relate through a shared crossing angle of 30°, 60°, or 90°.
+  Instance scales are 1×, 1½×, ½×, and optionally 2×. Phases advance by quarter
+  cycles. Placements use the origin, anchor, and its mirror.
+- Composition multiplies the first two layers and adds other relatives, adds
+  every layer, or modulates the first two with the remaining layers. Instance
+  weights are explicit.
 
 Profiles cycle through sine, triangle, saw, pulse, additive harmonics, and
 coordinate modulation, from a seed-dependent starting profile. Every pair uses
-at least three distinct profiles. A separate random stream chooses the starting
-profile and detail values, preserving the initial generator's spatial plans.
-The pulse width, overtone amount, and modulation depth are exposed as sliders
-where applicable. Each pair keeps these choices identical on both sides.
+at least two distinct profiles. A separate random stream chooses the starting
+profile and detail values. Pulse width, detail, scale, weight, and all eight
+control coordinates are exposed per instance. Each pair keeps its profile and
+detail choices identical on both sides.
 
 The harmonic component combines a 0.7-weight fundamental with second and third
 harmonics weighted by `0.2 × detail` and `0.1 × detail`. The modulated component
 offsets its coordinate by `0.14 × detail` times a half-frequency sine, with a
-quarter-cycle phase offset. This makes the waveform itself a structured signal;
-the surrounding stripe/ring composition rules remain the earlier experiment's.
+quarter-cycle phase offset.
+
+## Texture across the whole field
+
+Each curve exposes along/across coordinates and unsigned distance. Distance bends
+a global linear coordinate, rather than masking a stroke or ribbon. The resulting
+wave field stays active throughout the image. A second coordinate combines curve
+distance with a crossing linear coordinate, extending variation beyond endpoints.
+A slow along-curve wave modulates the finer grain.
+
+Each plan chooses one of three texture recipes:
+
+- **Etched:** fine crosswise waves with a slower variation in their strength.
+- **Braided:** crossing grain and a second carrier interact multiplicatively.
+- **Rippled:** a carrier modulates fine crosswise waves, with an added overtone.
+
+The broad carrier also receives a small grain-driven coordinate modulation.
+Fine detail is added to each motif before layers are composed. **Bend** controls
+the broad sweep; **Texture amount** controls fine detail and its coordinate
+modulation; **Texture scale** controls its relative frequency. Individual
+**Detail N** values also affect harmonic/modulated carriers where applicable.
+These are ordinary wave expressions and reusable components in version-1 source,
+with no new language built-ins or rendering special cases.
 
 These are choices in the plan, rather than relationships inferred from an
 anonymous expression graph. Source comments retain the plan choices. Named
-`oriented_N` and `placed_N` frames, `coordinate_N`, `motif_N`, and `layer_N`
-fields, and reusable harmonic/modulated components remain inspectable after
-compilation. `composition` is the final scalar field; `image` is the declared
-color output.
+`oriented_N`, `placed_N`, and `curve_N` frames, plus `along_N`, `across_N`,
+`distance_N`, `sweep_N`, `coordinate_N`, `cross_coordinate_N`, `grain_N`,
+`motif_N`, `texture_N`, and `layer_N` fields remain inspectable after compilation.
+`composition` is the final scalar field; `image` is the declared color output.
 
-Triangle, saw, and pulse profiles use new language built-ins; harmonic layering
-and coordinate modulation use ordinary components and arithmetic. Frequency
-ratios scale the coordinate field, phases use uniform angle addition, and
-placements use coordinate translation. Rotation, frequency, and phase sliders
-affect all instances; individual scale, weight, width, and detail sliders allow
-intentional variation. Binding changes remain separate from saved source defaults.
+Frequency ratios scale the coordinate field, phases use uniform angle addition,
+and placements use coordinate translation. Rotation, frequency, phase, bend,
+texture amount, and texture scale affect all instances.
+
+Enable **Curve guides** in Studio to see the curves over the selected field.
+Select a curve and drag its points; the guides account for rotation and placement.
+Generated control points have direct parameter bindings, so all can be edited.
+The family relationships describe generated defaults; an individual handle edit
+can deliberately depart from them. Binding changes remain separate from saved
+source defaults. The handwritten [Curve texture study](../programs/curve_textures.sf)
+instead shares one set of gesture parameters between two instances, so its handle
+edits propagate through the family.
 
 ## What each pair controls
 
 The independent plan is derived from its coordinated partner. It keeps the same
-motif kinds and count, waveform profiles, detail values, composition, weights,
-palette, scene rotation, base frequency, and global phase. It independently
-samples each motif's orientation, scale, phase offset, and placement. Scale
-sampling preserves fine stripes and
-coarser rings, while dropping harmonic constraints.
+motif count, waveform profiles, detail values, texture recipe, texture controls,
+bend, composition, weights, palette, scene rotation, base frequency, and global
+phase. It independently samples each motif's gesture from the same shape
+vocabulary, plus orientation, scale, phase offset, and placement. Scale sampling
+uses 80–120% of each instance's coordinated scale, preserving broad scale bands
+while dropping exact harmonic constraints.
 
 Both sources use the same field operations and have the same per-pixel operation
 budget. Uniform constant nodes can differ because negative literals introduce
 negation nodes. This experiment compares constraints on relative choices;
 global scene controls and component reuse remain present in both conditions.
+Matching graph operations does not match render time: adaptive curve subdivision
+can produce different segment counts for different gestures.
 
-The independent values are sampled from continuous ranges, so this is an
-exploratory comparison, not a statistically matched test of correlations alone.
+Gesture types are discrete choices with continuous coordinate variation, and
+independent transforms are sampled from continuous ranges. This is an exploratory
+comparison, not a statistically matched test of correlations alone.
 It also does not implement the expression-tree, mutation, or CPPN baselines from
 the longer novelty review. Those are possible later experiments.
 
 Compare before inspecting programs, since source comments reveal the condition.
 Useful questions are whether motifs recur recognizably, whether distant areas
-feel related, whether several scales coexist, and whether inspecting the program
-explains something about its image. A/B assignment is shuffled per pair; neither
-position identifies a condition.
+feel related, whether fine texture supports the larger sweeps, whether several
+scales coexist, and whether inspecting the program explains something about its
+image. A/B assignment is shuffled per pair; neither position identifies a
+condition. The gallery does not record preferences or train a model.
 
 ## Artifacts and reproduction
 
@@ -101,14 +138,14 @@ Open any source directly with `cargo run -- path/to/pair-NN-a.sf`, or render an
 intermediate without the gallery:
 
 ```sh
-cargo run -- render generated/waveforms-42/pair-01-a.sf motif_0 /tmp/motif.ppm
+cargo run -- render generated/curves-42/pair-01-a.sf texture_0 /tmp/texture.ppm
 ```
 
 The source includes batch seed, pair number, slot, derived pair seed, condition,
 generator version, and plan choices. The source itself is sufficient to load and
 render an image even if the generator later changes.
 
-`starfish-waveforms-v2` uses fixed SplitMix64 streams with separate domains for
+`starfish-curves-v3` uses fixed SplitMix64 streams with separate domains for
 planning, waveform selection, ablation, and slot assignment. The same version,
 batch seed, and pair count produce identical filenames, source, and pixels on
 the same runtime.
@@ -117,6 +154,7 @@ the existing CPU semantics; cross-platform bit-for-bit image parity is not
 promised. Future changes to synthesis behavior should change the generator
 version. Repeating a study requires a new destination directory.
 
-Earlier `starfish-relations-v1` sources still load unchanged. Their generator
-identity and rendered study describe the earlier sine-only synthesis; v2 uses
-its own identity because the same seed now produces different waveforms.
+Earlier `starfish-relations-v1` and `starfish-waveforms-v2` sources still load
+unchanged. Their identities describe the sine-only and richer waveform studies.
+Version 3 uses its own identity because the same seed now produces curve families
+and textured fields. The source language remains version 1.

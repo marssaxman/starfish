@@ -135,17 +135,22 @@ pub fn write_batch(directory: &Path, seed: u64, count: usize) -> Result<(), Stri
             directory.join("README.txt"),
             format!(
                 "Starfish comparison study\nGenerator: {GENERATOR_VERSION}\nBatch seed: {seed}\nPairs: {count}\n\n\
-             Motifs explore sine, triangle, saw, pulse, harmonic, and modulated waveforms.\n\
+             Two to four cubic curves bend interacting wave fields across the whole image.\n\
+             Textures explore etched lines, braided crossings, and nested ripples,\n\
+             with sine, triangle, saw, pulse, harmonic, and modulated carriers.\n\
              Each pair has the same motifs, waveform profiles, detail controls, composition, weights, palette, and field-operation budget.\n\
-             One condition uses related orientations, harmonic scales, phase offsets, and mirrored placements.\n\
-             The other samples these relative choices independently, retaining fine/coarse scale bands.\n\
+             One condition varies a shared curve gesture, with related orientations, harmonic scales, phase offsets, and mirrored placements.\n\
+             The other samples gestures and relative choices independently, retaining each instance's broad scale band.\n\
+             Texture recipe, bend, texture amount, and texture scale are matched within each pair.\n\
              Scene rotation, base frequency, and phase controls remain shared in both conditions.\n\n\
              A/B order is shuffled deterministically; pairs.tsv contains neutral source filenames.\n\
              Browse with: cargo run -- gallery <this directory>\n\
              Compare A and B before inspecting source or opening answers.tsv.\n\
              Each .sf is self-contained and includes generator provenance and its explicit plan.\n\
              Each .ppm is a {PREVIEW_SIZE} x {PREVIEW_SIZE} preview from the existing CPU renderer.\n\n\
-             Look for recurring motifs, long-range relationships, structure at several scales,\n\
+             In Studio, enable Curve guides to see the paths; select a curve and drag its points.\n\
+             Try Bend, Texture amount, Texture scale, and the intermediate grain/texture fields.\n\n\
+             Look for recurring gestures, long-range relationships, structure at several scales,\n\
              and whether inspecting the program explains the image.\n\
              This is a small visual experiment, not a claim of aesthetic superiority.\n\n\
              Reproduce with: cargo run -- generate <new directory> {seed} {count}\n"

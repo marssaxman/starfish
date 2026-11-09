@@ -1,6 +1,7 @@
 use std::{fs, time::Duration};
 
 use crate::{
+    evaluate::{CurveGuide, curve_guides},
     program::{DefinitionKind, ParameterBindings, StarfishProgram, Type, display_name},
     render::{self, RenderRequest},
     source::Decl,
@@ -8,6 +9,7 @@ use crate::{
 use eframe::egui::{self, Color32, RichText};
 
 const PREVIEW_SIZE: usize = 448;
+const DRAG_PREVIEW_SIZE: usize = 224;
 
 pub struct Studio {
     program: StarfishProgram,
@@ -21,6 +23,10 @@ pub struct Studio {
     load_error: Option<String>,
     path: String,
     path_input: String,
+    guides: Vec<CurveGuide>,
+    show_curves: bool,
+    active_curve: usize,
+    render_size: usize,
 }
 
 impl Studio {
@@ -46,6 +52,10 @@ impl Studio {
             load_error: None,
             path: path.clone(),
             path_input: path,
+            guides: Vec::new(),
+            show_curves: false,
+            active_curve: 0,
+            render_size: PREVIEW_SIZE,
         }
     }
 
@@ -71,6 +81,7 @@ impl Studio {
                 self.texture = None;
                 self.dirty = true;
                 self.load_error = None;
+                self.active_curve = 0;
             }
             Err(error) => self.load_error = Some(error),
         }
@@ -95,6 +106,9 @@ impl Studio {
                         self.open(&path);
                     }
                     ui.horizontal_wrapped(|ui| {
+                        if ui.small_button("Curve textures").clicked() {
+                            self.open("programs/curve_textures.sf");
+                        }
                         if ui.small_button("Bézier study").clicked() {
                             self.open("programs/bezier_study.sf");
                         }
@@ -317,20 +331,29 @@ impl Studio {
     }
 
     fn rerender(&mut self, ctx: &egui::Context) {
-        if !self.dirty {
+        let dragging = ctx.input(|input| input.pointer.any_down());
+        if !self.dirty && (dragging || self.render_size == PREVIEW_SIZE) {
             return;
         }
         self.dirty = false;
+        self.render_size = if dragging {
+            DRAG_PREVIEW_SIZE
+        } else {
+            PREVIEW_SIZE
+        };
         match render::render(
             &self.program,
             &self.bindings,
             RenderRequest {
                 output: &self.selected,
-                width: PREVIEW_SIZE,
-                height: PREVIEW_SIZE,
+                width: self.render_size,
+                height: self.render_size,
             },
         ) {
             Ok(image) => {
+                self.guides =
+                    curve_guides(&self.program, &self.bindings, &self.selected).unwrap_or_default();
+                self.active_curve = self.active_curve.min(self.guides.len().saturating_sub(1));
                 self.render_duration = image.duration;
                 self.render_error = None;
                 let image = egui::ColorImage::from_rgba_unmultiplied(
@@ -345,13 +368,14 @@ impl Studio {
                 }
             }
             Err(error) => {
+                self.guides.clear();
                 self.texture = None;
                 self.render_error = Some(error);
             }
         }
     }
 
-    fn preview(&self, ctx: &egui::Context) {
+    fn preview(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(8.0);
             ui.heading(&self.program.name);
@@ -362,10 +386,25 @@ impl Studio {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&item.name).strong());
                 ui.weak(format!(
-                    "{} · {PREVIEW_SIZE} × {PREVIEW_SIZE}",
-                    item.ty.name()
+                    "{} · {} × {}",
+                    item.ty.name(), self.render_size, self.render_size
                 ));
             });
+            if !self.guides.is_empty() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.checkbox(&mut self.show_curves, "Curve guides");
+                    if self.show_curves {
+                        egui::ComboBox::from_id_salt("active_curve")
+                            .selected_text(&self.guides[self.active_curve].name)
+                            .show_ui(ui, |ui| {
+                                for (index, guide) in self.guides.iter().enumerate() {
+                                    ui.selectable_value(&mut self.active_curve, index, &guide.name);
+                                }
+                            });
+                        ui.weak("Drag the selected curve’s points");
+                    }
+                });
+            }
             ui.separator();
             let available = ui.available_size();
             let area_height = (available.y - 52.0).max(1.0);
@@ -380,6 +419,9 @@ impl Studio {
                     egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                     Color32::WHITE,
                 );
+            }
+            if self.show_curves {
+                self.curve_overlay(ui, image_rect);
             }
             if let Some(error) = &self.render_error {
                 ui.colored_label(Color32::LIGHT_RED, error);
@@ -400,10 +442,191 @@ impl Studio {
             );
         });
     }
+
+    fn curve_overlay(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
+        let painter = ui.painter().with_clip_rect(rect);
+        let to_screen = |[x, y]: [f32; 2]| {
+            egui::pos2(
+                rect.left() + (x + 1.0) * rect.width() * 0.5,
+                rect.top() + (1.0 - y) * rect.height() * 0.5,
+            )
+        };
+        for (index, guide) in self.guides.iter().enumerate() {
+            let points = guide.points.map(to_screen);
+            let active = index == self.active_curve;
+            let stroke = egui::Stroke::new(
+                if active { 2.0 } else { 1.0 },
+                if active {
+                    Color32::from_rgb(255, 223, 130)
+                } else {
+                    Color32::from_white_alpha(110)
+                },
+            );
+            // A dark underlay keeps the curve legible over both light and dark textures.
+            for stroke in [
+                egui::Stroke::new(stroke.width + 2.0, Color32::from_black_alpha(180)),
+                stroke,
+            ] {
+                painter.add(egui::epaint::CubicBezierShape::from_points_stroke(
+                    points,
+                    false,
+                    Color32::TRANSPARENT,
+                    stroke,
+                ));
+            }
+            if !active {
+                continue;
+            }
+            painter.line_segment(
+                [points[0], points[1]],
+                egui::Stroke::new(1.0, Color32::WHITE),
+            );
+            painter.line_segment(
+                [points[2], points[3]],
+                egui::Stroke::new(1.0, Color32::WHITE),
+            );
+            for (slot, point) in points.iter().enumerate() {
+                let editable = guide.editable(slot);
+                let hit =
+                    egui::Rect::from_center_size(*point, egui::vec2(18.0, 18.0)).intersect(rect);
+                if hit.is_positive() {
+                    let response = ui.interact(
+                        hit,
+                        ui.id().with(("curve_handle", guide.node, slot)),
+                        if editable {
+                            egui::Sense::drag()
+                        } else {
+                            egui::Sense::hover()
+                        },
+                    );
+                    let response = response.on_hover_text(if editable {
+                        "Drag to change this control point. Reset parameters restores the source defaults."
+                    } else { "This point is computed; adjust its parameters in the inspector." });
+                    if response.dragged() || response.drag_stopped() {
+                        if let Some(pos) = response.interact_pointer_pos() {
+                            let world = [
+                                2.0 * (pos.x - rect.left()) / rect.width() - 1.0,
+                                1.0 - 2.0 * (pos.y - rect.top()) / rect.height(),
+                            ];
+                            if guide.move_point(slot, world, &self.program, &mut self.bindings) {
+                                self.dirty = true;
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                    }
+                }
+                painter.circle(
+                    *point,
+                    if slot == 0 || slot == 3 { 5.0 } else { 4.0 },
+                    if editable {
+                        Color32::from_rgb(255, 223, 130)
+                    } else {
+                        Color32::GRAY
+                    },
+                    egui::Stroke::new(1.5, Color32::BLACK),
+                );
+                painter.text(
+                    *point + egui::vec2(8.0, -5.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    ["Start", "Handle A", "Handle B", "End"][slot],
+                    egui::FontId::proportional(11.0),
+                    Color32::WHITE,
+                );
+            }
+        }
+    }
 }
 
 impl eframe::App for Studio {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.show(ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dragging_a_curve_handle_updates_bindings_and_the_preview() {
+        let ctx = egui::Context::default();
+        let source = include_str!("../programs/bezier_study.sf");
+        let program = StarfishProgram::from_source(source).unwrap();
+        let mut studio = Studio::new(&ctx, program, "bezier_study.sf".into());
+        studio.show_curves = true;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 950.0),
+            )),
+            ..Default::default()
+        };
+        // Let egui settle panel widths and text layout before locating the image.
+        for _ in 0..2 {
+            let _ = ctx.run(input.clone(), |ctx| studio.show(ctx));
+        }
+        let mut output = ctx.run(input.clone(), |ctx| studio.show(ctx));
+        let texture = studio.texture.as_ref().unwrap().id();
+        let rect = output
+            .shapes
+            .iter()
+            .find(|shape| shape.shape.texture_id() == texture)
+            .unwrap()
+            .shape
+            .visual_bounding_rect();
+        let point = studio.guides[0].points[0];
+        let start = egui::pos2(
+            rect.left() + (point[0] + 1.0) * rect.width() * 0.5,
+            rect.top() + (1.0 - point[1]) * rect.height() * 0.5,
+        );
+        let target = start + egui::vec2(30.0, -20.0);
+        let original = studio.bindings.0.clone();
+        let mut saw_drag_preview = false;
+        for events in [
+            vec![egui::Event::PointerMoved(start)],
+            vec![egui::Event::PointerButton {
+                pos: start,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            vec![egui::Event::PointerMoved(target)],
+            vec![],
+            vec![egui::Event::PointerButton {
+                pos: target,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            vec![],
+            vec![],
+        ] {
+            let mut frame = input.clone();
+            frame.events = events;
+            output = ctx.run(frame, |ctx| studio.show(ctx));
+            saw_drag_preview |= studio.render_size == DRAG_PREVIEW_SIZE;
+        }
+        assert!(saw_drag_preview);
+        assert_eq!(studio.render_size, PREVIEW_SIZE);
+        assert_ne!(studio.bindings.0, original);
+        assert_eq!(&studio.bindings.0[2..], &original[2..]);
+        assert_eq!(studio.program.source, source);
+        assert_eq!(studio.selected, studio.program.output);
+        assert!(studio.render_error.is_none());
+        assert!(!studio.dirty);
+        let moved = studio.guides[0].points[0];
+        let rect = output
+            .shapes
+            .iter()
+            .find(|shape| shape.shape.texture_id() == texture)
+            .unwrap()
+            .shape
+            .visual_bounding_rect();
+        let actual = egui::pos2(
+            rect.left() + (moved[0] + 1.0) * rect.width() * 0.5,
+            rect.top() + (1.0 - moved[1]) * rect.height() * 0.5,
+        );
+        // Allow the image's pixel rounding and small layout changes between frames.
+        assert!(actual.distance(target) < 2.0, "{actual:?} != {target:?}");
     }
 }

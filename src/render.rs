@@ -68,6 +68,64 @@ mod tests {
     use super::*;
 
     #[test]
+    fn curve_texture_study_is_active_everywhere_and_all_controls_change_it() {
+        let program =
+            StarfishProgram::from_source(include_str!("../programs/curve_textures.sf")).unwrap();
+        let bindings = ParameterBindings::defaults(&program);
+        let image = |bindings: &ParameterBindings, output: &str| {
+            render(
+                &program,
+                bindings,
+                RenderRequest {
+                    output,
+                    width: 48,
+                    height: 48,
+                },
+            )
+            .unwrap()
+            .rgba
+        };
+        let original = image(&bindings, &program.output);
+        for tile_y in 0..4 {
+            for tile_x in 0..4 {
+                let values: Vec<_> = (tile_y * 12..(tile_y + 1) * 12)
+                    .flat_map(|y| (tile_x * 12..(tile_x + 1) * 12).map(move |x| (y * 48 + x) * 4))
+                    .map(|index| original[index])
+                    .collect();
+                assert!(
+                    values.iter().max().unwrap() - values.iter().min().unwrap() > 24,
+                    "inactive image tile {tile_x}, {tile_y}"
+                );
+            }
+        }
+        for output in ["etching", "braiding", "ripples", "texture"] {
+            let pixels = image(&bindings, output);
+            assert!(pixels.chunks_exact(4).all(|p| p[0] == p[1] && p[1] == p[2]));
+            assert!(
+                pixels.chunks_exact(4).any(|p| p != &pixels[..4]),
+                "{output} is constant"
+            );
+        }
+        for (index, parameter) in program.parameters.iter().enumerate() {
+            let mut changed = bindings.clone();
+            changed.0[index] = parameter.min;
+            assert_ne!(
+                original,
+                image(&changed, &program.output),
+                "{}",
+                parameter.id
+            );
+        }
+        let guides = crate::evaluate::curve_guides(&program, &bindings, &program.output).unwrap();
+        assert_eq!(guides.len(), 2);
+        let mut changed = bindings.clone();
+        guides[0].move_point(1, [0.1, 0.4], &program, &mut changed);
+        let moved = crate::evaluate::curve_guides(&program, &changed, &program.output).unwrap();
+        assert_ne!(guides[0].points[1], moved[0].points[1]);
+        assert_ne!(guides[1].points[1], moved[1].points[1]);
+    }
+
+    #[test]
     fn wave_lab_fields_render_and_each_live_control_changes_the_image() {
         let program =
             StarfishProgram::from_source(include_str!("../programs/wave_lab.sf")).unwrap();

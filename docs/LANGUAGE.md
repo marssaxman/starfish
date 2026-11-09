@@ -1,6 +1,7 @@
 # Starfish source language, version 1
 
 A .sf file is UTF-8 source for one self-contained image program. See
+[Curve texture study](../programs/curve_textures.sf),
 [Bézier wave study](../programs/bezier_study.sf),
 [Wave laboratory](../programs/wave_lab.sf),
 [Shared tides](../programs/shared_tides.sf), and
@@ -173,6 +174,15 @@ the first segment in traversal order. At folds or self-intersections, nearest
 locations and side signs may change abruptly; the side sign also changes
 across the tangent extension past an endpoint. Symmetric `abs(across)` patterns
 avoid that endpoint sign seam. Controls and prepared curve values must be finite.
+
+Studio's optional **Curve guides** overlay displays curves reachable from the
+selected output. It maps control points back through rotation and translation
+to their world positions, including curves instantiated through components.
+Select a guide to expose its handles. Points constructed from two distinct direct
+scalar parameters can be dragged; constants and computed coordinates remain
+read-only in the overlay. Shared parameters update every instance that uses them.
+Bindings change without rewriting source or changing the declared output.
+Nested, non-affine curve coordinates have no world-space guide.
 
 ## Palettes
 

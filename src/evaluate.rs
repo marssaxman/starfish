@@ -39,7 +39,132 @@ pub struct Evaluator<'a> {
     curves: Vec<Option<BezierFrame>>,
 }
 
+/// A curve in world coordinates, with optional direct parameter bindings for editing.
+/// Inspection uses the same prepared uniforms as rendering, including component calls.
+pub struct CurveGuide {
+    pub node: usize,
+    pub name: String,
+    pub points: [[f32; 2]; 4],
+    parameters: [[Option<usize>; 2]; 4],
+    origin: [f32; 2],
+    basis: [[f32; 2]; 2],
+}
+
+impl CurveGuide {
+    pub fn editable(&self, point: usize) -> bool {
+        self.parameters[point].iter().all(Option::is_some)
+            && self.parameters[point][0] != self.parameters[point][1]
+    }
+
+    pub fn move_point(
+        &self,
+        point: usize,
+        world: [f32; 2],
+        program: &StarfishProgram,
+        bindings: &mut ParameterBindings,
+    ) -> bool {
+        if !self.editable(point) {
+            return false;
+        }
+        let mut changed = false;
+        for axis in 0..2 {
+            let index = self.parameters[point][axis].unwrap();
+            let value =
+                self.origin[axis] + self.basis[0][axis] * world[0] + self.basis[1][axis] * world[1];
+            let parameter = &program.parameters[index];
+            let value = value.clamp(parameter.min, parameter.max);
+            changed |= bindings.0[index] != value;
+            bindings.0[index] = value;
+        }
+        changed
+    }
+}
+
+pub fn curve_guides(
+    program: &StarfishProgram,
+    bindings: &ParameterBindings,
+    output: &str,
+) -> Result<Vec<CurveGuide>, String> {
+    let evaluator = Evaluator::new(program, bindings, output)?;
+    let mut guides = Vec::new();
+    for &index in &evaluator.order {
+        let node = &program.nodes[index];
+        if !matches!(node.operation, Operation::Bezier) {
+            continue;
+        }
+        let input = node.inputs[0];
+        // Only affine input frames have a unique world-space control polygon.
+        // A curve defined inside another curve's coordinates still renders normally.
+        let Some(origin) = evaluator.affine_point(input, [0.0, 0.0]) else {
+            continue;
+        };
+        let basis = [[1.0, 0.0], [0.0, 1.0]].map(|point| {
+            let mapped = evaluator.affine_point(input, point).unwrap();
+            [mapped[0] - origin[0], mapped[1] - origin[1]]
+        });
+        let determinant = basis[0][0] * basis[1][1] - basis[1][0] * basis[0][1];
+        if !determinant.is_finite() || determinant.abs() < 1e-6 {
+            continue;
+        }
+        let points = std::array::from_fn(|slot| {
+            let local = evaluator.values[node.inputs[slot + 1]].point();
+            let x = local[0] - origin[0];
+            let y = local[1] - origin[1];
+            [
+                (basis[1][1] * x - basis[1][0] * y) / determinant,
+                (basis[0][0] * y - basis[0][1] * x) / determinant,
+            ]
+        });
+        if !points.iter().flatten().all(|value| value.is_finite()) {
+            continue;
+        }
+        let parameters = std::array::from_fn(|slot| {
+            let point = &program.nodes[node.inputs[slot + 1]];
+            if !matches!(point.operation, Operation::Vec2) {
+                return [None; 2];
+            }
+            std::array::from_fn(|axis| match program.nodes[point.inputs[axis]].operation {
+                Operation::Parameter(index) => Some(index),
+                _ => None,
+            })
+        });
+        let name = program
+            .items
+            .iter()
+            .find(|item| item.node == index)
+            .map(|item| item.name.clone())
+            .unwrap_or_else(|| format!("Curve {}", guides.len() + 1));
+        guides.push(CurveGuide {
+            node: index,
+            name,
+            points,
+            parameters,
+            origin,
+            basis,
+        });
+    }
+    Ok(guides)
+}
+
 impl<'a> Evaluator<'a> {
+    fn affine_point(&self, index: usize, world: [f32; 2]) -> Option<[f32; 2]> {
+        let node = &self.program.nodes[index];
+        match node.operation {
+            Operation::World => Some(world),
+            Operation::Rotate => {
+                let [x, y] = self.affine_point(node.inputs[0], world)?;
+                let (sin, cos) = self.rotations[index]?;
+                Some([cos * x - sin * y, sin * x + cos * y])
+            }
+            Operation::Sub => {
+                let [x, y] = self.affine_point(node.inputs[0], world)?;
+                let [a, b] = self.values[node.inputs[1]].point();
+                Some([x - a, y - b])
+            }
+            _ => None,
+        }
+    }
+
     pub fn new(
         program: &'a StarfishProgram,
         bindings: &'a ParameterBindings,
@@ -217,6 +342,40 @@ fn palette_sample(field: f32, stops: &[[f32; 3]]) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn curve_guides_invert_frames_and_edit_only_direct_bindings() {
+        let source = r#"starfish 1; program "Guides" {
+            param x: Scalar = 0.2 in -1..1 step 0.01;
+            param y: Scalar = 0.3 in -1..1 step 0.01;
+            frame local = rotate(world, 90deg) - point2(0.4, -0.2);
+            component gesture(p: Field<Point2>, a: Point2) -> Field<Point2> =
+                bezier(p, a, point2(-0.3, 0), point2(0.3, 0), point2(0.7, 0));
+            frame curve = gesture(local, point2(x, y));
+            field distance = abs(dot(curve, vec2(0, 1)));
+            palette ink = smooth [rgb(0, 0, 0), rgb(1, 1, 1)];
+            output image = palette(ink, distance);
+        }"#;
+        let program = StarfishProgram::from_source(source).unwrap();
+        let mut bindings = ParameterBindings::defaults(&program);
+        let guides = curve_guides(&program, &bindings, &program.output).unwrap();
+        // The uninstantiated component validation graph must not create a guide.
+        assert_eq!(guides.len(), 1);
+        let guide = &guides[0];
+        assert!((guide.points[0][0] - 0.1).abs() < 1e-6);
+        assert!((guide.points[0][1] + 0.6).abs() < 1e-6);
+        assert!(guide.editable(0));
+        assert!(!guide.editable(1));
+        guide.move_point(0, [0.4, -0.8], &program, &mut bindings);
+        assert!((bindings.0[0] - 0.4).abs() < 1e-6);
+        assert!((bindings.0[1] - 0.6).abs() < 1e-6);
+        let unchanged = bindings.0.clone();
+        guide.move_point(1, [0.0, 0.0], &program, &mut bindings);
+        assert_eq!(bindings.0, unchanged);
+        guide.move_point(0, [20.0, -20.0], &program, &mut bindings);
+        assert_eq!(bindings.0, vec![1.0, 1.0]);
+        assert_eq!(program.source, source);
+    }
 
     #[test]
     fn bezier_fields_follow_shared_rotation_and_validate_computed_points() {

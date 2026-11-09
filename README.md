@@ -14,8 +14,8 @@ cargo run
 cargo run -- programs/crosscurrent.sf
 ```
 
-The first command opens [Bézier wave study](programs/bezier_study.sf), a
-wave field filling the image and shaped by an adjustable cubic curve. The second
+The first command opens [Curve texture study](programs/curve_textures.sf), a
+pair of related cubic curves shaping interacting wave fields. The second
 opens [Crosscurrent](programs/crosscurrent.sf). In the left pane, type a source
 path and press **Open**, or use the sample buttons. An invalid file leaves
 the current program open and shows the validation error. Select a named field
@@ -25,7 +25,20 @@ dependencies, program source, and live parameter bindings.
 Frames, axes, and component definitions in the left pane can also be selected
 for inspection while the image preview stays on the last selected field.
 
-In Bézier study, move **Start**, **End**, and **Handle a/b** x/y sliders to
+Enable **Curve guides** above the image to see the paths and control handles.
+Choose a curve from the adjacent menu and drag its points. Guides follow shared
+rotation and placement, and are available when inspecting generated programs too.
+Dragging changes preview bindings; **Reset parameters** restores the saved defaults.
+Computed control points are shown in gray and remain adjustable through their
+parameters. Off-image handles can also be adjusted through sliders.
+
+In Curve textures, both curves reuse one gesture, so dragging either changes
+both. **Crossing** and **Spread** vary their relationship. Adjust **Bend**,
+**Texture amount**, and **Texture scale**, or inspect **Etching**, **Braiding**,
+and **Ripples** to see how fine detail relates to the broader waves.
+
+The **Bézier study** button opens the earlier single-curve example.
+Move **Start**, **End**, and **Handle a/b** x/y sliders to
 reshape the curve. Adjust **Bend**, **Frequency**, **Cross frequency**, and
 **Modulation** to change how the curve shapes the waves throughout the image.
 Select **Along**, **Across**, **Distance**, **Sweep**, or **Modulated** to inspect
@@ -53,6 +66,7 @@ cargo run -- render programs/shared_tides.sf final /tmp/shared-tides.ppm 512 512
 cargo run -- render programs/crosscurrent.sf fine /tmp/fine.ppm 512 512
 cargo run -- render programs/wave_lab.sf modulated /tmp/modulated.ppm 512 512
 cargo run -- render programs/bezier_study.sf final /tmp/bezier.ppm 512 512
+cargo run -- render programs/curve_textures.sf final /tmp/textures.ppm 768 768
 ```
 
 `final` selects the program's declared output. A stable field ID such as
@@ -62,24 +76,25 @@ The files use binary PPM (P6) to keep the CLI independent of image libraries.
 ## Generate a comparison study
 
 ```sh
-cargo run -- generate generated/waveforms-42
-cargo run -- gallery generated/waveforms-42
+cargo run -- generate generated/curves-42
+cargo run -- gallery generated/curves-42
 ```
 
 The first command creates twelve reproducible A/B pairs with batch seed 42.
-Each pair combines stripes and rings using sine, triangle, saw, pulse,
-harmonic, or modulated profiles.
+Each pair combines two to four cubic curves using sine, triangle, saw, pulse,
+harmonic, or modulated profiles, with etched, braided, or rippled detail.
 The output directory must be new. Each pair includes two self-contained `.sf`
 programs and their 256 × 256 PPM previews. The native gallery displays the
 images with shuffled A/B labels; click an image or **Inspect** to open its
 fields, source, and sliders in Studio. **Back to pairs** returns to the gallery.
 The conditions are revealed in source comments and `answers.tsv`.
 
-Within a pair, one program uses related orientations, harmonic scales, phase
-offsets, and planned placements; the other samples those choices independently.
-Both use the same motif structure, waveform profiles, pulse widths, harmonic
-detail, modulation depth, composition, weights, palette, and number of field
-operations. Across pairs, profiles, motif count, and composition also vary.
+Within a pair, one program varies a common curve gesture with related orientations,
+harmonic scales, phase offsets, and planned placements; the other samples gestures
+and those relationships independently. Both use the same motif count, waveform
+profiles, texture recipe and controls, bend, detail, composition, weights, palette,
+and number of field operations. Across pairs, profiles, texture, motif count, and
+composition also vary. Every pattern fills the image.
 
 To choose another seed or pair count:
 
@@ -112,7 +127,8 @@ invalid render requests, reproducible generated pairs,
 matched field-operation budgets, and batch/gallery loading.
 Curve checks include straight and curved coordinates, an independent dense
 reference, finite endpoints, collapsed handles, shared rotation, live controls,
-and visible variation throughout the image.
+visible variation throughout the image, transformed guides, handle dragging,
+shared gesture editing, and restoration of full preview resolution after a drag.
 
 ## Current scope
 
@@ -122,12 +138,18 @@ and palettes. Richer signals use additive harmonics and scalar coordinate
 modulation. It supports
 typed reusable components and named frames, plus a small deterministic
 composition generator.
-It has no imports, loops, recursive components, source editor, graphical editing,
-persistence of slider presets, multi-segment paths, or curve generation yet.
+It has no imports, loops, recursive components, source editor, graph editor,
+persistence of slider presets, or multi-segment paths yet.
 Bézier curves currently enter through four uniform control points and expose
 along/across coordinates through the existing field and component model.
 
-Rendering runs synchronously at 448 × 448 in Studio. Color stops are normalized
+Curve guides support world coordinates with rotation and translation. Curves
+inside another curve's coordinate system render but have no world-space guide.
+Control points with two distinct direct scalar parameter bindings can be dragged;
+computed coordinates are read-only in the overlay.
+
+Rendering runs synchronously at 448 × 448 in Studio, using 224 × 224 while
+dragging controls and restoring full resolution on release. Color stops are normalized
 RGB values and palette interpolation is specified in the language guide.
 The Studio shows loaded source verbatim; it does not yet reformat or edit it.
 The legacy application is independent background material.
