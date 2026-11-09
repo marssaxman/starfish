@@ -398,6 +398,9 @@ impl Studio {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(8.0);
             ui.heading(&self.program.name);
+            if let Some(description) = crate::arrangement::describe(&self.program.source) {
+                ui.weak(description);
+            }
             let item = self
                 .program
                 .item(&self.selected)

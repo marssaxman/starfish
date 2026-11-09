@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod arrangement;
 mod bezier;
 mod comparison;
 mod evaluate;
@@ -35,7 +36,7 @@ fn run() -> Result<(), String> {
         ),
         [flag] if flag == "--help" || flag == "-h" => {
             println!(
-                "Usage:\n  starfish-studio [studio] [program.sf]\n  starfish-studio render program.sf output-id image.ppm [width height]\n  starfish-studio generate directory [seed [pairs]]\n  starfish-studio gallery directory\n  starfish-studio vary program.sf session-directory [seed [pairs]]\n  starfish-studio explore session-directory\n\nGeneration defaults: seed 42, 12 pairs. The output directory must be new.\nVariation defaults: seed 42, 6 pairs, texture changes only.\nStudio exploration defaults to explorations/default; explore resumes a named session."
+                "Usage:\n  starfish-studio [studio] [program.sf]\n  starfish-studio render program.sf output-id image.ppm [width height]\n  starfish-studio generate directory [seed [pairs]]\n  starfish-studio gallery directory\n  starfish-studio vary program.sf session-directory [seed [pairs]]\n  starfish-studio arrange program.sf session-directory [seed [pairs]]\n  starfish-studio explore session-directory\n\nGeneration defaults: seed 42, 12 pairs. The output directory must be new.\nVariation defaults: seed 42, 6 pairs, texture changes only.\nArrangement defaults: seed 42, 6 pairs, composition changes only.\nStudio exploration defaults to explorations/default; explore resumes a named session."
             );
             Ok(())
         }
@@ -43,22 +44,22 @@ fn run() -> Result<(), String> {
         [command, path] if command == "studio" => launch(load(path)?, path.clone(), false),
         [command, directory] if command == "gallery" => launch_gallery(directory),
         [command, directory] if command == "explore" => launch_exploration(directory),
-        [command, path, directory, options @ ..] if command == "vary" => {
-            let (seed, count) =
-                match options {
-                    [] => (42, 6),
-                    [seed] => (parse_seed(seed)?, 6),
-                    [seed, count] => (
-                        parse_seed(seed)?,
-                        count
-                            .parse::<usize>()
-                            .map_err(|_| "Pair count must be an integer")?,
-                    ),
-                    _ => return Err(
-                        "Usage: starfish-studio vary program.sf session-directory [seed [pairs]]"
-                            .into(),
-                    ),
-                };
+        [command, path, directory, options @ ..] if command == "vary" || command == "arrange" => {
+            let (seed, count) = match options {
+                [] => (42, 6),
+                [seed] => (parse_seed(seed)?, 6),
+                [seed, count] => (
+                    parse_seed(seed)?,
+                    count
+                        .parse::<usize>()
+                        .map_err(|_| "Pair count must be an integer")?,
+                ),
+                _ => {
+                    return Err(format!(
+                        "Usage: starfish-studio {command} program.sf session-directory [seed [pairs]]"
+                    ));
+                }
+            };
             if !(1..=12).contains(&count) {
                 return Err("Choose between 1 and 12 variation pairs".into());
             }
@@ -68,10 +69,22 @@ fn run() -> Result<(), String> {
                 &ParameterBindings::defaults(&program),
                 &program.output,
             )?;
+            if command == "arrange" && !arrangement::supports(&program, &snapshot.output) {
+                return Err("Arrangement studies require Bézier fields and a scalar or direct palette output".into());
+            }
             let store = session::Session::open(Path::new(directory))?;
             let parent = store.save(&snapshot, None)?;
             store.visit(&parent.id)?;
-            let round = store.vary(&parent.id, seed, count, variation::Settings::default())?;
+            let settings = if command == "arrange" {
+                variation::Settings {
+                    texture: false,
+                    composition: true,
+                    ..Default::default()
+                }
+            } else {
+                variation::Settings::default()
+            };
+            let round = store.vary(&parent.id, seed, count, settings)?;
             store.view_round(&round.id)?;
             println!(
                 "Generated {count} variation pairs in {directory} (seed {seed}).\nExplore with: cargo run -- explore {directory}"

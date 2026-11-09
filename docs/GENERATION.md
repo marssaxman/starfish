@@ -24,6 +24,12 @@ version-1 Starfish source. It does not render or write files. The batch command
 uses the existing compiler and CPU renderer; the native gallery is another client
 of the same APIs.
 
+The source-based exploration policy additionally supports structural arrangements:
+enable **Composition** in Studio or use `cargo run -- arrange program.sf session`.
+It builds reflected, repeated, alternating, rotational, nested, and interrupted
+families from an existing construction while retaining its shared controls.
+See [curve arrangements](EXPLORATION.md#curve-arrangements).
+
 A coordinated plan chooses a scene frame, base frequency, shared phase, anchor,
 palette, composition, and a parent cubic gesture. It instantiates two to four
 relatives of that gesture:

@@ -3,12 +3,24 @@
 use std::{collections::HashMap, ops::Range};
 
 use crate::{
+    arrangement::{self, Plan},
     evaluate::Evaluator,
     program::{ParameterBindings, StarfishProgram, Type},
     source::{self, Decl, Expr},
 };
 
-pub const VERSION: &str = "starfish-variations-v1";
+pub const VERSION: &str = "starfish-variations-v2";
+
+pub fn proposal_seed(batch: u64, index: usize, attempt: u64, settings: Settings) -> u64 {
+    let seed = batch
+        .wrapping_add((index as u64).wrapping_mul(0x9e3779b97f4a7c15))
+        .wrapping_add(attempt.wrapping_mul(0xd1b54a32d192ed03));
+    if settings.composition {
+        (seed & !7) | batch.wrapping_add(index as u64) % arrangement::Kind::ALL.len() as u64
+    } else {
+        seed
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Snapshot {
@@ -158,14 +170,20 @@ fn names(expr: &Expr, output: &mut Vec<String>) {
 /// components stay ordinary source; locked groups are copied byte for byte.
 pub fn propose(parent: &Snapshot, settings: Settings, seed: u64) -> Result<Snapshot, String> {
     Settings::from_mask(settings.mask(), settings.strength)?;
-    let program = parent.program()?;
+    let unpacked = arrangement::unpack(parent)?;
+    let base = &unpacked.base;
+    let program = base.program()?;
+    let structural = arrangement::supports(&program, &base.output);
     let mut random = Random(seed ^ 0x766172696174696f);
     let mut edits = Vec::new();
     let mut shared = HashMap::new();
     let palette_shift = std::array::from_fn::<_, 3, _>(|_| random.signed() * settings.strength);
     for decl in &program.hir {
         match decl {
-            Decl::Parameter(parameter) if settings.mask() & group(&parameter.name) != 0 => {
+            Decl::Parameter(parameter)
+                if settings.mask() & group(&parameter.name) != 0
+                    && !(structural && group(&parameter.name) == 8) =>
+            {
                 let key = if parameter.name.starts_with("scale_") {
                     "scale"
                 } else {
@@ -192,7 +210,7 @@ pub fn propose(parent: &Snapshot, settings: Settings, seed: u64) -> Result<Snaps
                 }
             }
             Decl::Definition(definition)
-                if settings.composition && definition.name == "composition" =>
+                if settings.composition && !structural && definition.name == "composition" =>
             {
                 let mut inputs = program
                     .items
@@ -233,7 +251,7 @@ pub fn propose(parent: &Snapshot, settings: Settings, seed: u64) -> Result<Snaps
         }
     }
     if settings.texture {
-        for (span, function) in source::call_spans(&parent.source, &["wave", "triangle", "saw"])? {
+        for (span, function) in source::call_spans(&base.source, &["wave", "triangle", "saw"])? {
             if random.signed().abs() < settings.strength * 1.5
                 && !edits
                     .iter()
@@ -247,8 +265,8 @@ pub fn propose(parent: &Snapshot, settings: Settings, seed: u64) -> Result<Snaps
             }
         }
     }
-    let source = edit(&parent.source, edits);
-    let source = if source == parent.source {
+    let source = edit(&base.source, edits);
+    let source = if source == base.source && !(structural && settings.composition) {
         source
     } else {
         format!(
@@ -257,10 +275,16 @@ pub fn propose(parent: &Snapshot, settings: Settings, seed: u64) -> Result<Snaps
             settings.strength
         )
     };
-    let snapshot = Snapshot {
+    let mut snapshot = Snapshot {
         source,
-        output: parent.output.clone(),
+        output: base.output.clone(),
     };
+    if structural && settings.composition {
+        snapshot = arrangement::compose(&snapshot, &Plan::from_seed(seed))?;
+    } else if let Some(plan) = unpacked.plan {
+        snapshot = arrangement::compose(&snapshot, &plan)?;
+    }
+    snapshot.output = parent.output.clone();
     snapshot.program()?;
     Ok(snapshot)
 }

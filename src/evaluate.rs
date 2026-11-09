@@ -161,6 +161,11 @@ impl<'a> Evaluator<'a> {
                 let [a, b] = self.values[node.inputs[1]].point();
                 Some([x - a, y - b])
             }
+            Operation::Scale => {
+                let [x, y] = self.affine_point(node.inputs[0], world)?;
+                let [a, b] = self.values[node.inputs[1]].point();
+                Some([x * a, y * b])
+            }
             _ => None,
         }
     }
@@ -235,6 +240,14 @@ impl<'a> Evaluator<'a> {
         }
         for &index in &evaluator.order {
             let node = &program.nodes[index];
+            if matches!(node.operation, Operation::Scale)
+                && !evaluator.values[node.inputs[1]]
+                    .point()
+                    .iter()
+                    .all(|v| v.is_finite())
+            {
+                return Err("scale factors must be finite".into());
+            }
             if matches!(node.operation, Operation::Pulse) {
                 let width = evaluator.values[node.inputs[3]].scalar();
                 if !width.is_finite() || !(0.0..=1.0).contains(&width) {
@@ -272,6 +285,11 @@ impl<'a> Evaluator<'a> {
                 let (sin, cos) =
                     self.rotations[index].expect("rotation prepared from a uniform angle");
                 Value::Point([cos * x - sin * y, sin * x + cos * y])
+            }
+            Operation::Scale => {
+                let [x, y] = input(0).point();
+                let [a, b] = input(1).point();
+                Value::Point([x * a, y * b])
             }
             Operation::Dot => {
                 let [x, y] = input(0).point();
@@ -342,6 +360,38 @@ fn palette_sample(field: f32, stops: &[[f32; 3]]) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn coordinate_scaling_handles_reflection_collapse_and_computed_invalid_factors() {
+        let source = r#"starfish 1; program "Scaled coordinates" {
+            frame coordinates = scale(world, vec2(-2, 0.5));
+            field value = dot(coordinates, vec2(1, 1));
+            palette ink = smooth [rgb(0, 0, 0), rgb(1, 1, 1)];
+            output image = palette(ink, value);
+        }"#;
+        let program = StarfishProgram::from_source(source).unwrap();
+        let bindings = ParameterBindings::defaults(&program);
+        let actual = Evaluator::new(&program, &bindings, "value")
+            .unwrap()
+            .sample(0.3, 0.4)
+            .scalar();
+        assert!((actual + 0.4).abs() < 1e-6);
+        let source = source.replace("vec2(-2, 0.5)", "vec2(0, 0)");
+        let collapsed = StarfishProgram::from_source(&source).unwrap();
+        assert_eq!(
+            Evaluator::new(&collapsed, &bindings, "value")
+                .unwrap()
+                .sample(0.3, 0.4)
+                .scalar(),
+            0.0
+        );
+        let invalid = source.replace(
+            "vec2(0, 0)",
+            "vec2(300000000000000000000000000000000000000 * 2, 1)",
+        );
+        let invalid = StarfishProgram::from_source(&invalid).unwrap();
+        assert!(Evaluator::new(&invalid, &bindings, "value").is_err());
+    }
 
     #[test]
     fn curve_guides_invert_frames_and_edit_only_direct_bindings() {

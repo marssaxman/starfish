@@ -162,7 +162,8 @@ impl Explorer {
                     ui.checkbox(&mut self.settings.gesture, "Gesture");
                     ui.checkbox(&mut self.settings.texture, "Texture");
                     ui.checkbox(&mut self.settings.palette, "Palette");
-                    ui.checkbox(&mut self.settings.composition, "Composition");
+                    ui.checkbox(&mut self.settings.composition, "Composition")
+                        .on_hover_text("Rearrange curve families using reflection, repetition, alternation, and different instance counts.");
                     ui.add(
                         egui::Slider::new(&mut self.settings.strength, 0.02..=0.35)
                             .text("Amount")
@@ -363,7 +364,6 @@ impl Explorer {
             let result = result.and_then(|round| {
                 self.refresh()?;
                 self.open_round(ctx, round, true)?;
-                self.seed = self.seed.wrapping_add(1);
                 self.message = Some("Choose A, B, both, or neither. Inspect a candidate to keep it or branch again.".into());
                 Ok(())
             });
@@ -424,6 +424,10 @@ impl Explorer {
             store.view_round(&record.id)?;
         }
         self.settings = record.settings.unwrap_or(self.settings);
+        self.count = record.pairs.len();
+        if let Some(seed) = record.seed {
+            self.seed = seed.wrapping_add(1);
+        }
         self.comparison = Some(Comparison { record, cards });
         self.show_comparison = true;
         self.show_history = false;
@@ -746,6 +750,8 @@ mod tests {
         let reopened = Explorer::resume(&ctx, program.clone(), "study.sf".into(), root.clone());
         assert!(reopened.show_comparison);
         assert_eq!(reopened.comparison.as_ref().unwrap().record.id, round.id);
+        assert_eq!(reopened.seed, round.seed.unwrap().wrapping_add(1));
+        assert_eq!(reopened.count, round.pairs.len());
         let child = explorer.comparison.as_ref().unwrap().cards[0][0].id.clone();
         click(&ctx, &mut explorer, "Inspect A");
         assert!(!explorer.show_comparison);
@@ -793,6 +799,30 @@ mod tests {
             explorer.comparison.as_ref().unwrap().record.parents,
             round.pairs[0]
         );
+        explorer.settings = Settings {
+            texture: false,
+            composition: true,
+            ..Default::default()
+        };
+        click(&ctx, &mut explorer, "Regenerate");
+        finish(&ctx, &mut explorer);
+        let store = Session::open(&root).unwrap();
+        for id in explorer
+            .comparison
+            .as_ref()
+            .unwrap()
+            .record
+            .pairs
+            .iter()
+            .flatten()
+        {
+            assert!(
+                crate::arrangement::unpack(&store.snapshot(id).unwrap())
+                    .unwrap()
+                    .plan
+                    .is_some()
+            );
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 }

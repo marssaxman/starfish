@@ -449,9 +449,7 @@ impl Session {
             let snapshot = &snapshots[parent_index];
             let mut found = None;
             for attempt in 0..24u64 {
-                let proposal_seed = seed
-                    .wrapping_add((index as u64).wrapping_mul(0x9e3779b97f4a7c15))
-                    .wrapping_add(attempt.wrapping_mul(0xd1b54a32d192ed03));
+                let proposal_seed = variation::proposal_seed(seed, index, attempt, settings);
                 let Ok(child) = variation::propose(snapshot, settings, proposal_seed) else {
                     continue;
                 };
@@ -919,6 +917,47 @@ mod tests {
         assert!(store.vary(&parent.id, 10, 1, Settings::default()).is_err());
         assert_eq!(store.candidates().unwrap().len(), 1);
         assert!(store.rounds().unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn composition_rounds_cover_all_relationships_and_replay_from_saved_proposal_seeds() {
+        let root = std::env::temp_dir().join(format!("starfish-arrangements-{}", unique('c')));
+        let store = Session::open(&root).unwrap();
+        let parent_snapshot = parent();
+        let parent = store.save(&parent_snapshot, None).unwrap();
+        let settings = Settings {
+            texture: false,
+            composition: true,
+            ..Default::default()
+        };
+        let round = store.vary(&parent.id, 42, 6, settings).unwrap();
+        let mut kinds = HashSet::new();
+        for id in round.pairs.iter().flatten() {
+            let record = store.candidate(id).unwrap();
+            let snapshot = store.snapshot(id).unwrap();
+            let unpacked = crate::arrangement::unpack(&snapshot).unwrap();
+            kinds.insert(format!("{:?}", unpacked.plan.unwrap().kind));
+            assert_eq!(
+                variation::propose(&parent_snapshot, settings, record.seed.unwrap()).unwrap(),
+                snapshot
+            );
+        }
+        assert_eq!(kinds.len(), crate::arrangement::Kind::ALL.len());
+        store.choose(&round, 0, Preference::Both).unwrap();
+        let next = store
+            .vary_picks(&round.id, 99, 1, Settings::default())
+            .unwrap();
+        for id in next.pairs.iter().flatten() {
+            let record = store.candidate(id).unwrap();
+            let ancestor = store.snapshot(record.parent.as_ref().unwrap()).unwrap();
+            assert_eq!(
+                crate::arrangement::unpack(&ancestor).unwrap().plan,
+                crate::arrangement::unpack(&store.snapshot(id).unwrap())
+                    .unwrap()
+                    .plan
+            );
+        }
         fs::remove_dir_all(root).unwrap();
     }
 }

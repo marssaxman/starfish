@@ -36,6 +36,19 @@ settings.
 families for **Both** and skipping **Neither**.
 **History** reopens saved images and comparison rounds, including earlier branches.
 
+With **Composition** enabled, Bézier constructions can become reflected families,
+repeated sweeps, alternating instances, rotational families, nested echoes, or
+interrupted repetitions. Instance counts vary from two to four. Leave **Gesture**
+and **Texture** unchecked to explore arrangements of the same underlying motif.
+All instances share its controls; curve-guide edits propagate through the family.
+
+Create a twelve-image arrangement study, then open its comparison view:
+
+```sh
+cargo run -- arrange programs/curve_textures.sf explorations/arrangement-families-42 42 6
+cargo run -- explore explorations/arrangement-families-42
+```
+
 Studio saves this work in `explorations/default` and resumes the last saved image
 or comparison when launched without a source path. For a named session:
 
@@ -170,7 +183,8 @@ source defaults; there is no separate preset system.
 Bézier curves currently enter through four uniform control points and expose
 along/across coordinates through the existing field and component model.
 
-Curve guides support world coordinates with rotation and translation. Curves
+Curve guides support world coordinates with rotation, translation, reflection,
+and independent axis scaling. Curves
 inside another curve's coordinate system render but have no world-space guide.
 Control points with two distinct direct scalar parameter bindings can be dragged;
 computed coordinates are read-only in the overlay.

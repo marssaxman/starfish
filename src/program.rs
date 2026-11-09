@@ -78,6 +78,7 @@ pub enum Operation {
     World,
     Parameter(usize),
     Rotate,
+    Scale,
     Bezier,
     Abs,
     Dot,
@@ -156,6 +157,7 @@ struct Compiler<'a> {
     symbols: HashMap<String, usize>,
     param_indices: HashMap<String, usize>,
     def_nodes: HashMap<String, (usize, Type)>,
+    component_calls: HashMap<(String, Vec<usize>), (usize, Type)>,
     active: HashSet<String>,
     nodes: Vec<Node>,
     parameters: Vec<Parameter>,
@@ -176,7 +178,7 @@ impl<'a> Compiler<'a> {
             let name = decl.symbol();
             if [
                 "world", "rotate", "dot", "length", "wave", "triangle", "saw", "pulse", "tanh",
-                "vec2", "point2", "palette", "rgb", "smooth", "bezier", "abs",
+                "vec2", "point2", "palette", "rgb", "smooth", "bezier", "abs", "scale",
             ]
             .contains(&name)
                 || symbols.insert(name.to_owned(), index).is_some()
@@ -239,6 +241,7 @@ impl<'a> Compiler<'a> {
             symbols,
             param_indices,
             def_nodes: HashMap::new(),
+            component_calls: HashMap::new(),
             active: HashSet::new(),
             nodes: Vec::new(),
             parameters,
@@ -310,6 +313,7 @@ impl<'a> Compiler<'a> {
             })
             .collect();
         for component in &components {
+            let checkpoint = self.nodes.len();
             let mut scope = HashMap::new();
             for param in &component.params {
                 let value = self.push(Operation::Dummy, vec![], param.ty)?;
@@ -326,6 +330,12 @@ impl<'a> Compiler<'a> {
                     component.return_type.name()
                 ));
             }
+            // Validation uses temporary arguments. Keep only executable nodes and
+            // memoized calls whose arguments and results predate that scratch graph.
+            self.nodes.truncate(checkpoint);
+            self.component_calls.retain(|(_, inputs), (output, _)| {
+                *output < checkpoint && inputs.iter().all(|input| *input < checkpoint)
+            });
         }
         Ok(StarfishProgram {
             id: self.parsed.id,
@@ -489,6 +499,7 @@ impl<'a> Compiler<'a> {
                     ));
                 }
                 let mut scope = HashMap::new();
+                let mut inputs = Vec::new();
                 for (arg, param) in args.iter().zip(&component.params) {
                     let result = self.compile_expr(arg, locals, depth)?;
                     if result.1 != param.ty {
@@ -500,6 +511,11 @@ impl<'a> Compiler<'a> {
                         ));
                     }
                     scope.insert(param.name.clone(), result);
+                    inputs.push(result.0);
+                }
+                let key = (name.to_owned(), inputs);
+                if let Some(&result) = self.component_calls.get(&key) {
+                    return Ok(result);
                 }
                 let result = self.compile_expr(&component.expr, &scope, depth + 1)?;
                 if result.1 != component.return_type {
@@ -510,6 +526,7 @@ impl<'a> Compiler<'a> {
                         component.return_type.name()
                     ));
                 }
+                self.component_calls.insert(key, result);
                 return Ok(result);
             }
         }
@@ -524,6 +541,7 @@ impl<'a> Compiler<'a> {
             ("point2", [Type::Scalar, Type::Scalar]) => (Operation::Vec2, Type::Point2),
             ("rotate", [Type::FieldPoint, Type::Angle]) => (Operation::Rotate, Type::FieldPoint),
             ("rotate", [Type::Vec2, Type::Angle]) => (Operation::Rotate, Type::Vec2),
+            ("scale", [Type::FieldPoint, Type::Vec2]) => (Operation::Scale, Type::FieldPoint),
             (
                 "bezier",
                 [
@@ -606,6 +624,51 @@ pub fn display_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reused_component_calls_share_nodes_and_scratch_validation_does_not_leak() {
+        let source = r#"starfish 1; program "Reusable calls" {
+            component signal(p: Field<Point2>) -> Field<Scalar> =
+                wave(dot(p, vec2(1, 0)), 2cycles, 0rad);
+            frame shared = scale(world, vec2(-2, 0.5));
+            field a = signal(shared);
+            field b = signal(shared);
+            field sum = a + b;
+            palette ink = smooth [rgb(0, 0, 0), rgb(1, 1, 1)];
+            output image = palette(ink, sum);
+        }"#;
+        let program = StarfishProgram::from_source(source).unwrap();
+        assert_eq!(
+            program.item("a").unwrap().node,
+            program.item("b").unwrap().node
+        );
+        assert!(
+            !program
+                .nodes
+                .iter()
+                .any(|node| matches!(node.operation, Operation::Dummy))
+        );
+        for invalid in [
+            source.replace(
+                "scale(world, vec2(-2, 0.5))",
+                "scale(world, point2(-2, 0.5))",
+            ),
+            source.replace(
+                "scale(world, vec2(-2, 0.5))",
+                "scale(point2(0, 0), vec2(-2, 0.5))",
+            ),
+            source.replace(
+                "field a =",
+                "component broken(p: Field<Point2>) -> Field<Scalar> = unknown(p); field a =",
+            ),
+            source.replace(
+                "field a =",
+                "component recursive(p: Field<Point2>) -> Field<Scalar> = recursive(p); field a =",
+            ),
+        ] {
+            assert!(StarfishProgram::from_source(&invalid).is_err());
+        }
+    }
 
     #[test]
     fn bezier_frames_require_four_uniform_points_and_point_field_input() {

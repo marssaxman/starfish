@@ -81,6 +81,7 @@ The built-ins in version 1 are:
 | --- | --- |
 | `vec2(x, y)`, `point2(x, y)` | Uniform vector and point constructors |
 | `rotate(value, angle)` | Rotate a vector or a coordinate field |
+| `scale(point_field, vector)` | Multiply coordinate x/y by the corresponding uniform vector components |
 | `bezier(point_field, start, handle_a, handle_b, end)` | Curve-relative coordinate field for a cubic Bézier |
 | `abs(value)` | Absolute value of a `Scalar` or scalar field |
 | `dot(point_field, vector)` | Pointwise dot product, yielding a scalar field |
@@ -178,9 +179,20 @@ locations and side signs may change abruptly; the side sign also changes
 across the tangent extension past an endpoint. Symmetric `abs(across)` patterns
 avoid that endpoint sign seam. Controls and prepared curve values must be finite.
 
+Coordinate scaling supports reflection and different scales along each axis:
+
+    frame reflected = scale(world, vec2(-1, 1));
+    frame compressed = scale(world, vec2(2, 0.5));
+
+These transform sample coordinates: doubling x compresses the apparent image
+horizontally. Negative factors reflect it. Zero factors collapse an axis.
+Factors must be finite, including computed factors and runtime bindings.
+
 Studio's optional **Curve guides** overlay displays curves reachable from the
 selected output. It maps control points back through rotation and translation
 to their world positions, including curves instantiated through components.
+Scaling and reflection are included when mapping the guides back to world space.
+Singular frames, such as an axis collapsed to zero, have no invertible guide.
 Select a guide to expose its handles. Points constructed from two distinct direct
 scalar parameters can be dragged; constants and computed coordinates remain
 read-only in the overlay. Shared parameters update every instance that uses them.

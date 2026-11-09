@@ -47,12 +47,48 @@ Checked features can vary; unchecked features remain fixed:
 | Gesture | Control coordinates, rotation, bend, crossing angle, and spread |
 | Texture | Frequency, phase, detail, modulation, pulse width, relative scale, and sine/triangle/saw profile choices |
 | Palette | A shared RGB shift across each palette's stops, preserving their order |
-| Composition | Layer weights and additive, multiplicative, or modulated combinations of named ingredients |
+| Composition | Reflected, repeated, alternating, rotational, nested, or interrupted families, with different instance counts and combinations |
 
 **Amount** controls numeric perturbations and the chance of changing waveform
-profiles. Composition choices are discrete alternatives. The controls affect
-only features available in the source: composition changes require weights or
-a field named `composition` with at least two named ingredients.
+profiles. Composition choices are discrete alternatives. For Bézier programs
+with a scalar or direct palette output, Composition constructs a reusable motif
+from the current saved construction and changes its arrangement. The underlying
+gesture, texture, palette, and internal weights stay fixed unless their own
+controls are edited. For programs without curves, Composition retains its
+earlier layer-weight and ingredient-combination variations.
+
+## Curve arrangements
+
+To compare arrangements of the same construction, enable **Composition**, leave
+**Gesture**, **Texture**, and **Palette** unchecked, and click **Regenerate** or
+**Make variations**. A twelve-image batch cycles through all six rule types:
+
+- **Reflected family:** two or four instances reflected across shared axes.
+- **Repeated sweeps:** translated instances with common orientation and scale.
+- **Alternating family:** repeated positions with alternating reflection, scale,
+  and field polarity.
+- **Rotational family:** three or four instances at related angles around a center.
+- **Nested echoes:** progressively scaled and turned instances of one motif.
+- **Interrupted repetition:** a repeated family with one member displaced, turned,
+  resized, and reversed in polarity.
+
+Counts range from two to four. The mixture can add, weave, or modulate the
+instances; reflected families use equal contributions to retain reflection.
+Every instance remains a field over the whole image. These rules do not mask
+curves into bounded strokes.
+
+The saved source contains reusable, coordinate-parameterized components and
+named `layout_frame_N` and `layout_instance_N` declarations. The rule and count
+are recorded in a versioned `@starfish-arrangement-v1` source comment. Shared
+spacing, rotation, and coordinate-scale parameters remain editable in Studio.
+The preview names the arrangement, and **Curve guides** exposes all its curves.
+Dragging a handle updates every related instance through shared bindings.
+
+With Composition unchecked, subsequent texture, palette, and gesture variations
+retain the current arrangement, including edited layout controls. With Composition
+enabled, a new arrangement can replace it and add or remove instances. Each
+generation rebuilds the related instances from the saved underlying motif,
+preventing an ever-growing stack of copied arrangements.
 
 The parameter groups recognize the names emitted by the generator and the bundled
 examples. Control parameters use `curve_N_…`, `start_…`, `end_…`, and `handle_…`;
@@ -95,6 +131,15 @@ The optional seed and pair count default to 42 and 6. Counts range from 1 to 12.
 This command uses the same default texture-only variation policy as Studio.
 It can append a new branch to an existing session without overwriting records.
 
+For composition-only variations, use:
+
+```sh
+cargo run -- arrange programs/curve_textures.sf explorations/arrangement-families-42 42 6
+cargo run -- explore explorations/arrangement-families-42
+```
+
+This holds the gesture, texture, and palette fixed while exploring arrangements.
+
 The older coordinated/independent comparison gallery also records judgments:
 
 ```sh
@@ -133,7 +178,10 @@ can be rendered at any supported resolution.
 The same parent source and selected output, variation policy version, settings,
 seed, and pair count reproduce the same accepted source programs and pixels
 on the same runtime. Candidate IDs identify saved occurrences and intentionally
-differ across runs. Child records also retain the actual proposal seed, including
+differ across runs. The current policy is `starfish-variations-v2`, which adds
+structural arrangements and cycles relationship types across composition batches.
+Earlier saved sources and session histories continue to load; regeneration uses
+the current policy. Child records retain the actual proposal seed, including
 deterministic retries, so individual proposals can be replayed.
 
 Copy a whole session folder to move or back up the history. Local `explorations/`

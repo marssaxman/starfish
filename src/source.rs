@@ -218,6 +218,15 @@ pub fn parse(source: &str) -> Result<ParsedProgram, String> {
     .program()
 }
 
+pub fn program_end(source: &str) -> Result<usize, String> {
+    lex(source)?
+        .into_iter()
+        .rev()
+        .find(|token| matches!(token.kind, TokenKind::Symbol('}')))
+        .map(|token| token.start)
+        .ok_or_else(|| "Missing program body".into())
+}
+
 /// Token ranges, so edits never rewrite comments or parts of longer identifiers.
 pub fn call_spans(source: &str, names: &[&str]) -> Result<Vec<(Range<usize>, String)>, String> {
     Ok(lex(source)?
