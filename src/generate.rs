@@ -3,7 +3,7 @@
 
 use std::fmt::Write;
 
-pub const GENERATOR_VERSION: &str = "starfish-relations-v1";
+pub const GENERATOR_VERSION: &str = "starfish-waveforms-v2";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Condition {
@@ -31,6 +31,38 @@ impl MotifKind {
         match self {
             Self::Stripe => "stripe",
             Self::Ring => "ring",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Waveform {
+    Sine,
+    Triangle,
+    Saw,
+    Pulse,
+    Harmonic,
+    Modulated,
+}
+
+impl Waveform {
+    const ALL: [Self; 6] = [
+        Self::Sine,
+        Self::Triangle,
+        Self::Saw,
+        Self::Pulse,
+        Self::Harmonic,
+        Self::Modulated,
+    ];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Sine => "sine",
+            Self::Triangle => "triangle",
+            Self::Saw => "saw",
+            Self::Pulse => "pulse",
+            Self::Harmonic => "harmonic",
+            Self::Modulated => "modulated",
         }
     }
 }
@@ -65,6 +97,8 @@ enum Phase {
 #[derive(Clone, Debug)]
 struct Motif {
     kind: MotifKind,
+    waveform: Waveform,
+    detail: f64,
     orientation: Orientation,
     scale: Scale,
     placement: Placement,
@@ -108,8 +142,8 @@ pub struct ComparisonPair {
     pub b: DesignPlan,
 }
 
-/// Separate random streams keep planning, ablation, and A/B order independent.
-/// Wrapping integer arithmetic and fixed decimal emission make v1 reproducible.
+/// Separate random streams keep spatial plans, profiles, ablation, and A/B order independent.
+/// Wrapping integer arithmetic and fixed decimal emission keep synthesis reproducible.
 struct Random(u64);
 
 impl Random {
@@ -162,6 +196,8 @@ impl DesignPlan {
         let mut motifs = vec![
             Motif {
                 kind: MotifKind::Stripe,
+                waveform: Waveform::Sine,
+                detail: 0.5,
                 orientation: Orientation::Relative(0.0),
                 scale: Scale::Ratio(2, 1),
                 placement: Placement::Origin,
@@ -170,6 +206,8 @@ impl DesignPlan {
             },
             Motif {
                 kind: MotifKind::Stripe,
+                waveform: Waveform::Sine,
+                detail: 0.5,
                 orientation: Orientation::Relative(crossing),
                 scale: Scale::Ratio(second_harmonic, 1),
                 placement: Placement::Origin,
@@ -180,6 +218,8 @@ impl DesignPlan {
         for index in 0..ring_count {
             motifs.push(Motif {
                 kind: MotifKind::Ring,
+                waveform: Waveform::Sine,
+                detail: 0.5,
                 orientation: Orientation::Relative(0.0),
                 scale: [Scale::Ratio(1, 1), Scale::Ratio(1, 2), Scale::Ratio(3, 2)][index],
                 placement: [Placement::Anchor, Placement::Mirror, Placement::Origin][index],
@@ -190,6 +230,13 @@ impl DesignPlan {
                 },
                 weight: random.between(0.4, 0.8),
             });
+        }
+        // Waveform exploration has its own stream so spatial plans stay familiar.
+        let mut profiles = Random(seed ^ 0x77617665666f726d);
+        let first = profiles.choose(Waveform::ALL.len());
+        for (index, motif) in motifs.iter_mut().enumerate() {
+            motif.waveform = Waveform::ALL[(first + index) % Waveform::ALL.len()];
+            motif.detail = profiles.between(0.2, 0.8);
         }
         Self {
             seed,
@@ -232,6 +279,7 @@ impl DesignPlan {
 // composition: {}
 // anchor: ({:.4}, {:.4}); palette: {}
 // All motifs share scene rotation, base frequency, and a phase control.
+// Waveform kinds and their detail controls are identical within each pair.
 // The independent condition removes constraints on their relative choices.
 starfish 1;
 program "Study {}" @id("study-{}") {{
@@ -241,12 +289,15 @@ program "Study {}" @id("study-{}") {{
     frame shared = rotate(world, rotation);
     axis primary = vec2(1, 0);
 
-    component stripe(p: Field<Point2>, axis: Vec2, scale: Scalar,
-                     frequency: Frequency, phase: Angle) -> Field<Scalar> =
-        wave(scale * dot(p, axis), frequency, phase);
-    component ring(p: Field<Point2>, scale: Scalar,
-                   frequency: Frequency, phase: Angle) -> Field<Scalar> =
-        wave(scale * length(p), frequency, phase);
+    component harmonic(coordinate: Field<Scalar>, frequency: Frequency,
+                       phase: Angle, detail: Scalar) -> Field<Scalar> =
+        0.7 * wave(coordinate, frequency, phase)
+        + detail * (0.2 * wave(2 * coordinate, frequency, phase)
+                    + 0.1 * wave(3 * coordinate, frequency, phase));
+    component modulated(coordinate: Field<Scalar>, frequency: Frequency,
+                        phase: Angle, detail: Scalar) -> Field<Scalar> =
+        wave(coordinate + 0.14 * detail * wave(0.5 * coordinate, frequency,
+                                             phase + 90deg), frequency, phase);
 "#,
             self.seed,
             self.condition.name(),
@@ -278,8 +329,8 @@ program "Study {}" @id("study-{}") {{
                 Phase::Shared => 0.0,
                 Phase::Offset(value) | Phase::Independent(value) => value,
             };
-            writeln!(source, "\n    // motif {index}: {}; orientation {:?}; scale {:?}; placement {:?}; phase {:?}",
-                motif.kind.name(), motif.orientation, motif.scale, motif.placement, motif.phase).unwrap();
+            writeln!(source, "\n    // motif {index}: {} {}; orientation {:?}; scale {:?}; placement {:?}; phase {:?}",
+                motif.waveform.name(), motif.kind.name(), motif.orientation, motif.scale, motif.placement, motif.phase).unwrap();
             writeln!(
                 source,
                 "    param scale_{index}: Scalar = {scale:.4} in 0.25..5 step 0.01;"
@@ -302,12 +353,39 @@ program "Study {}" @id("study-{}") {{
                 center[0], center[1]
             )
             .unwrap();
-            let axis_argument = if motif.kind == MotifKind::Stripe {
-                "primary, "
-            } else {
-                ""
+            let coordinate = match motif.kind {
+                MotifKind::Stripe => format!("dot(placed_{index}, primary)"),
+                MotifKind::Ring => format!("length(placed_{index})"),
             };
-            writeln!(source, "    field motif_{index}: Scalar = {}(placed_{index}, {axis_argument}scale_{index}, frequency, phase + {offset:.4}deg);", motif.kind.name()).unwrap();
+            writeln!(
+                source,
+                "    field coordinate_{index}: Scalar = scale_{index} * {coordinate};"
+            )
+            .unwrap();
+            let (function, extra) = match motif.waveform {
+                Waveform::Sine => ("wave", String::new()),
+                Waveform::Triangle => ("triangle", String::new()),
+                Waveform::Saw => ("saw", String::new()),
+                Waveform::Pulse => {
+                    writeln!(
+                        source,
+                        "    param width_{index}: Scalar = {:.4} in 0..1 step 0.01;",
+                        motif.detail
+                    )
+                    .unwrap();
+                    ("pulse", format!(", width_{index}"))
+                }
+                Waveform::Harmonic | Waveform::Modulated => {
+                    writeln!(
+                        source,
+                        "    param detail_{index}: Scalar = {:.4} in 0..1 step 0.01;",
+                        motif.detail
+                    )
+                    .unwrap();
+                    (motif.waveform.name(), format!(", detail_{index}"))
+                }
+            };
+            writeln!(source, "    field motif_{index}: Scalar = {function}(coordinate_{index}, frequency, phase + {offset:.4}deg{extra});").unwrap();
             writeln!(
                 source,
                 "    field layer_{index}: Scalar = weight_{index} * motif_{index};"
@@ -392,6 +470,7 @@ mod tests {
     fn pairs_compile_reproduce_and_preserve_field_budgets() {
         let mut structures = std::collections::HashSet::new();
         let mut orders = std::collections::HashSet::new();
+        let mut waveforms = std::collections::HashSet::new();
         for seed in (0..64).chain([u64::MAX]) {
             let pair = comparison_pair(seed, 0);
             let repeated = comparison_pair(seed, 0);
@@ -400,6 +479,11 @@ mod tests {
             assert_ne!(pair.a.condition, pair.b.condition);
             orders.insert(pair.a.condition.name());
             structures.insert((pair.a.composition.name(), pair.a.motifs.len()));
+            for (a, b) in pair.a.motifs.iter().zip(&pair.b.motifs) {
+                assert_eq!(a.waveform, b.waveform);
+                assert_eq!(a.detail, b.detail);
+                waveforms.insert(a.waveform.name());
+            }
             let a = StarfishProgram::from_source(&pair.a.source()).unwrap();
             let b = StarfishProgram::from_source(&pair.b.source()).unwrap();
             let signature = |program: &StarfishProgram| {
@@ -444,6 +528,7 @@ mod tests {
         }
         assert_eq!(orders.len(), 2);
         assert_eq!(structures.len(), 9);
+        assert_eq!(waveforms.len(), Waveform::ALL.len());
     }
 
     #[test]

@@ -1,0 +1,370 @@
+You have identified the three principal computational stages, but there are two other concerns that should remain architecturally independent:
+
+1. Evaluation: determining what a program or image is like.
+2. Studio: allowing a human to inspect and manipulate everything.
+
+The “goal-oriented randomness trainer” is best understood initially as a search controller or guided-synthesis engine. It only becomes a trainer when it begins learning persistent knowledge that improves future searches.
+
+The overall system I would hold in my head is:
+
+```text id="d3k54g"
+                                  ┌──────────────────────────┐
+                                  │     Starfish Studio      │
+                                  │ source · graph · preview │
+                                  │ parameters · search UI   │
+                                  └─────────────┬────────────┘
+                                                │
+                                                ▼
+Intent ──► Guided Search ──► Design Genome ──► Generator ──► Starfish Program
+                ▲                                      │             │
+                │                                      │             ▼
+                │                                      │         Compiler
+                │                                      │             │
+                │                                      │             ▼
+                └──────── Feature Report ◄── Analyzer ◄── Rendered Image
+```
+
+The critical boundary is that every route eventually produces an ordinary, self-contained Starfish program. A generated image should not remain dependent on the generator or search session that discovered it.
+
+## 1. The Starfish program is the central durable artifact
+
+The core artifact should be more than a flattened node DAG. It needs enough structure to remain intelligible in the IDE:
+
+```text id="j5nbvi"
+StarfishProgram
+    component definitions
+    component instances
+    exposed parameters
+    coordinate systems and transforms
+    named outputs
+    metadata and annotations
+    stable node/component identifiers
+```
+
+I would use at least two internal representations.
+
+The high-level IR preserves components, reuse, names, parameter declarations, and generator provenance. This is what the Studio normally displays.
+
+The lowered IR is a normalized computation graph suitable for optimization and shader generation. It can perform constant folding, common-subexpression elimination, inlining, type checking, coordinate propagation, and similar compiler work.
+
+This distinction matters because the global-coordination ideas we discussed naturally create reusable motifs and related components. If the compiler immediately flattens all of that into anonymous arithmetic nodes, the resulting program will render correctly but be almost impossible to understand.
+
+Textual Starfish source and the visual graph should both be views of this structured program. For the first version, I would make the textual representation authoritative and the graph view read-only. Full bidirectional graphical editing introduces a large amount of identity, layout, undo, and source-rewriting machinery that is unnecessary for the initial system.
+
+## 2. Core execution: language, compiler, and runtime
+
+The backend itself has several internal responsibilities, but they belong to one dependency layer:
+
+```text id="xna7qt"
+Source text
+    ↓ parse
+Structured Program IR
+    ↓ validate and lower
+Normalized Graph IR
+    ↓ optimize and code-generate
+Compiled Render Program
+    ↓ execute with bindings
+Image
+```
+
+A useful conceptual interface would be:
+
+```rust id="2gukm8"
+compile(program, compile_options) -> CompiledProgram
+
+render(
+    compiled_program,
+    parameter_bindings,
+    render_request,
+) -> RenderResult
+```
+
+A `RenderRequest` should be able to select any named output or node port, not merely the final image. That directly supports the old workflow of rendering a fragment of the graph.
+
+The runtime should also distinguish parameter bindings from program structure. A slider movement should normally update a uniform or parameter buffer without rebuilding the graph or recompiling the shader.
+
+The compiler/runtime layer should have no knowledge of how the program was created. Handwritten, randomly generated, mutated, or loaded from an old archive should all be equivalent.
+
+For execution backends, I would eventually have:
+
+```text id="s1a3gp"
+WebGPU/WGSL runtime     primary interactive renderer
+CPU reference runtime  testing, debugging, reproducibility
+```
+
+The CPU implementation need not be fast. Its role is to provide a simple semantic oracle for compiler tests and obscure operators.
+
+## 3. The generator is another compiler
+
+The generator becomes easier to reason about if it is not treated as a bag of random graph-construction routines. It can instead be treated as a compiler from a design description into a Starfish program:
+
+```text id="c51cn6"
+Generator policy + seed
+          ↓
+Design genome / generation plan
+          ↓
+Global planning
+          ↓
+Component-library construction
+          ↓
+Composition and instantiation
+          ↓
+Starfish Program
+```
+
+There are two related but distinct artifacts here.
+
+A generator policy describes distributions and rules: how often to choose various operators, how much complexity to allocate, what kinds of relationships to create, and so forth.
+
+A design genome records the concrete decisions for one candidate: this coordinate frame, these frequency families, these three motifs, these rotations, this composition tree, this palette, and these parameter values.
+
+The generator is then ideally deterministic:
+
+```rust id="i0duzu"
+generate(generator_policy, design_genome, seed) -> GeneratedProgram
+```
+
+The “global coordinator” belongs in this layer. It would produce a shared design context before individual components are generated. That context might contain:
+
+- Global axes and coordinate frames.
+- Symmetry or rotational relationships.
+- A palette and value structure.
+- A vocabulary of frequencies and scales.
+- Complexity allocations by region or layer.
+- Motifs intended for reuse.
+- Rules about repetition, contrast, and variation.
+
+The component-building pass then creates a small library using that common context. The composition pass assembles instances of those components into the final program. This gives you the repetition and self-similarity we discussed without baking “make a woven texture” directly into the system as a special-purpose operator.
+
+The generator should not normally render images or evaluate their appeal. It produces candidates and provenance. Keeping it pure makes it reproducible and allows different search methods to use the same generator.
+
+## 4. Evaluation must be separate from search
+
+The search engine cannot sensibly decide what to try unless something can describe the result. That is the job of the analyzer.
+
+The analyzer should return a feature report rather than one opaque aesthetic score:
+
+```text id="dmstl0"
+FeatureReport
+    structural graph measurements
+    spectral measurements
+    edge and texture measurements
+    contrast measurements
+    symmetry and repetition measurements
+    color and value measurements
+    spatial-distribution measurements
+    render cost and graph cost
+```
+
+Some features can be obtained without rendering:
+
+- Graph depth and node counts.
+- Operator diversity.
+- Component reuse.
+- Frequency ranges implied by operators.
+- Estimated execution cost.
+- Parameter sensitivity or degeneracy.
+- Whether large branches collapse to constants.
+
+Others require an image:
+
+- FFT spectrum and spectral slope.
+- Global and local contrast.
+- Entropy at several spatial scales.
+- Edge density and orientation.
+- Symmetry correlation.
+- Saliency distribution.
+- Occupied versus empty regions.
+- Clipping, banding, and near-uniform areas.
+
+This separation makes the metrics useful throughout the product. The Studio can display them to a human. The generator can be diagnosed with them. The guided-search system can optimize them. Regression tests can detect changes in renderer behavior.
+
+Evaluation should also be multi-fidelity. A candidate might proceed through:
+
+```text id="1fae9g"
+static graph checks
+    ↓
+64×64 or 128×128 render
+    ↓
+feature analysis
+    ↓
+larger preview for promising candidates
+    ↓
+final-resolution render
+```
+
+That prevents the search process from spending full rendering cost on obviously unsuitable programs.
+
+## 5. Guided synthesis is initially search, not training
+
+A goal such as “moderately complex, broadly radial, with strong local contrast but no high-frequency chaos” should become an explicit objective specification:
+
+```text id="fugl7i"
+ObjectiveSpec
+    hard constraints
+    target feature ranges
+    weighted preferences
+    novelty requirements
+    computational budget
+```
+
+The search controller then runs a propose-observe loop:
+
+```rust id="txkw7x"
+proposals = strategy.propose(search_state);
+
+for proposal in proposals {
+    program = generator.generate(proposal.genome);
+    preview = renderer.render(program);
+    features = analyzer.analyze(program, preview);
+    score = objective.evaluate(features);
+    strategy.observe(proposal, features, score);
+}
+```
+
+This subsystem should not directly contain the generator’s construction logic or the analyzer’s image-processing logic. It decides what candidates to request and how to react to the reports it receives.
+
+There are three progressively more ambitious forms of guidance:
+
+**Constrained sampling.** Reject candidates that fail explicit conditions and keep sampling. This is simple and provides a baseline.
+
+**Adaptive search.** Mutate genomes, maintain populations, preserve novelty, and move toward desired feature ranges. This is probably where Starfish should begin. The mixed discrete/continuous search space is a natural fit for evolutionary methods, novelty search, or MAP-Elites-style archives.
+
+**Persistent learning.** Learn generator priors or a human preference model from many previous searches. At this point “trainer” becomes an accurate term. It might learn, for example, which combinations of structural features tend to survive human selection.
+
+I would not begin with persistent machine learning. First build a search system whose proposals, measurements, and decisions can all be inspected. The resulting search records will also give you the dataset needed for any later learned model.
+
+## 6. There are three different kinds of parameter
+
+Keeping these separate will prevent a great deal of confusion.
+
+Runtime parameters are values inside one Starfish program: frequency, rotation, threshold, color, distortion strength. These are the natural Studio sliders and can often change without recompilation.
+
+Structural choices alter the program graph: adding a layer, changing an operator, reusing a motif, replacing a multiplication with a minimum. These require regeneration or graph transformation and usually recompilation.
+
+Generator-policy parameters change the distribution of future programs: preference for repeated motifs, probability of rotational relationships, expected graph depth, complexity allocation, and so forth.
+
+The guided-search system might operate at all three levels, but it should know which one it is changing. Otherwise a search result becomes impossible to interpret: did it discover a better parameter binding, a better graph, or a better generator policy?
+
+## 7. Provenance and reproducibility are first-class
+
+Random systems become extremely frustrating when an interesting result cannot be reconstructed.
+
+Every candidate should therefore retain something like:
+
+```text id="ar1p9a"
+ProgramBundle
+    structured Starfish program
+    default parameter bindings
+    explicit procedural-noise seeds
+    generator identity and version
+    generator-policy hash
+    design genome
+    generation seed
+    parent candidate IDs
+    compiler/runtime version
+```
+
+Randomness should be split into separate seed domains:
+
+- Generator randomness chooses structure.
+- Program randomness controls procedural noise.
+- Search randomness controls exploration.
+- Rendering should otherwise be deterministic.
+
+Generated programs should also contain provenance annotations on components and nodes. In the Studio, selecting a component could show that it came from “motif family 2,” was instantiated three times, inherited the global 60-degree frame, and was mutated from an earlier candidate.
+
+This is not merely archival bookkeeping. It is what makes the generated result understandable.
+
+## 8. The Studio is a client of all these systems
+
+The Studio should contain very little Starfish semantics of its own. It calls the same compiler, renderer, generator, analyzer, and search interfaces used by command-line and batch tools.
+
+A plausible workspace would have:
+
+```text id="eu4sci"
+Left:       source/component tree
+Center:     rendered output
+Right:      parameter inspector and sliders
+Optional:   graph view, metrics, provenance, generated candidates
+Bottom:     diagnostics, compile log, render timing
+```
+
+The most valuable early interactions would be:
+
+- Select any component or node output and render it.
+- Temporarily replace the final output with a selected fragment.
+- Adjust exposed parameters interactively.
+- Compare two parameter sets.
+- Display intermediate coordinate fields or scalar values as grayscale.
+- Show a component’s instances and relationships.
+- Inspect feature measurements.
+- Save a parameter setting as a new program revision.
+- Open a generated program and see why the generator made its decisions.
+
+Later, the same application can acquire a guided-synthesis workspace: enter constraints, watch candidate thumbnails appear, select or reject examples, inspect feature-space neighborhoods, and open a surviving candidate in the normal program inspector.
+
+The IDE therefore does not constitute another stage in the image-generation pipeline. It is an observatory and control surface placed across all stages.
+
+## 9. A clean package dependency graph
+
+At the implementation level, I would aim for something like:
+
+```text id="g43e2u"
+starfish-ir
+    ↑
+    ├── starfish-lang
+    ├── starfish-transform
+    ├── starfish-compiler
+    │       ├── starfish-runtime-webgpu
+    │       └── starfish-runtime-cpu
+    ├── starfish-generator
+    └── starfish-analysis
+
+starfish-search
+    depends on generator, analysis, and an abstract render service
+
+starfish-studio
+    depends on public APIs from all of the above
+
+starfish-cli
+    exposes compilation, rendering, generation, analysis, and search
+```
+
+The hard dependency rule should be:
+
+```text id="gz20yx"
+Core execution knows nothing about generation.
+Generation knows nothing about search.
+Analysis knows nothing about search strategy.
+Search coordinates the other systems through interfaces.
+Studio owns no domain semantics.
+```
+
+## 10. A practical construction order
+
+The smallest useful vertical slice is not the random generator. It is the program representation plus inspection loop.
+
+First, define the structured IR, parameter model, serialization, and stable identities. Implement a small operator set, compiler, and renderer. Add a command-line path that renders a saved program.
+
+Second, build a minimal Studio that can open a program, show canonical source, select an output, render it, and manipulate parameters. This becomes the development environment for every subsequent subsystem.
+
+Third, implement a deterministic generator with explicit genomes and provenance. Start with the global-plan → component-library → composition pipeline, even if each stage initially has very few choices.
+
+Fourth, add analyzers and a candidate-gallery batch tool. This lets you understand what the generator is actually producing before attempting to optimize it.
+
+Fifth, add guided search over genomes and runtime parameters. Begin with transparent evolutionary search and target ranges, not a learned aesthetic model.
+
+Sixth, collect human selections and search histories. Only then decide whether persistent policy training or preference learning is warranted.
+
+The resulting mental model is therefore not “renderer, random generator, mysterious trainer.” It is:
+
+```text id="ie88qh"
+A language and execution system
+A compiler-like procedural synthesis system
+An independent measurement system
+A search system that closes the feedback loop
+An IDE that makes every intermediate artifact visible
+```
+
+The most consequential early design choice is making the generated Starfish program structured, inspectable, and independent of its generator. If that boundary is sound, nearly everything else can evolve without trapping the project inside its first generation algorithm.

@@ -68,6 +68,119 @@ mod tests {
     use super::*;
 
     #[test]
+    fn wave_lab_fields_render_and_each_live_control_changes_the_image() {
+        let program =
+            StarfishProgram::from_source(include_str!("../programs/wave_lab.sf")).unwrap();
+        let bindings = ParameterBindings::defaults(&program);
+        let image = |bindings: &ParameterBindings, output: &str| {
+            render(
+                &program,
+                bindings,
+                RenderRequest {
+                    output,
+                    width: 24,
+                    height: 24,
+                },
+            )
+            .unwrap()
+            .rgba
+        };
+        let original = image(&bindings, &program.output);
+        for item in program.items.iter().filter(|item| {
+            matches!(
+                item.ty,
+                crate::program::Type::FieldScalar | crate::program::Type::FieldColor
+            )
+        }) {
+            let pixels = image(&bindings, &item.id);
+            assert!(
+                pixels.chunks_exact(4).any(|pixel| pixel != &pixels[..4]),
+                "{}",
+                item.id
+            );
+        }
+        for (index, parameter) in program.parameters.iter().enumerate() {
+            let mut changed = bindings.clone();
+            changed.0[index] = parameter.min;
+            assert_ne!(
+                original,
+                image(&changed, &program.output),
+                "{} has no effect",
+                parameter.id
+            );
+        }
+    }
+
+    #[test]
+    fn bezier_study_renders_fields_and_all_controls_change_the_final_image() {
+        let program =
+            StarfishProgram::from_source(include_str!("../programs/bezier_study.sf")).unwrap();
+        let bindings = ParameterBindings::defaults(&program);
+        let image = |bindings: &ParameterBindings, output: &str| {
+            render(
+                &program,
+                bindings,
+                RenderRequest {
+                    output,
+                    width: 32,
+                    height: 32,
+                },
+            )
+            .unwrap()
+            .rgba
+        };
+        let original = image(&bindings, &program.output);
+        // The curve study must retain visual activity across the whole image.
+        for tile_y in 0..4 {
+            for tile_x in 0..4 {
+                let mut minimum = [255u8; 3];
+                let mut maximum = [0u8; 3];
+                for y in tile_y * 8..(tile_y + 1) * 8 {
+                    for x in tile_x * 8..(tile_x + 1) * 8 {
+                        let pixel = &original[(y * 32 + x) * 4..][..3];
+                        for channel in 0..3 {
+                            minimum[channel] = minimum[channel].min(pixel[channel]);
+                            maximum[channel] = maximum[channel].max(pixel[channel]);
+                        }
+                    }
+                }
+                assert!(
+                    (0..3).any(|channel| maximum[channel] - minimum[channel] > 32),
+                    "inactive image tile {tile_x}, {tile_y}"
+                );
+            }
+        }
+        for item in program
+            .items
+            .iter()
+            .filter(|item| item.ty == crate::program::Type::FieldScalar)
+        {
+            let pixels = image(&bindings, &item.id);
+            assert!(
+                pixels
+                    .chunks_exact(4)
+                    .all(|pixel| pixel[0] == pixel[1] && pixel[1] == pixel[2])
+            );
+            assert!(
+                pixels.chunks_exact(4).any(|pixel| pixel != &pixels[..4]),
+                "{}",
+                item.id
+            );
+        }
+        for (index, parameter) in program.parameters.iter().enumerate() {
+            let mut changed = bindings.clone();
+            changed.0[index] = parameter.min;
+            assert_ne!(
+                original,
+                image(&changed, &program.output),
+                "{} has no effect",
+                parameter.id
+            );
+        }
+        assert_eq!(original, image(&bindings, &program.output));
+    }
+
+    #[test]
     fn intermediate_rendering_preserves_final_output_and_is_grayscale() {
         let program = StarfishProgram::sample();
         let bindings = ParameterBindings::defaults(&program);

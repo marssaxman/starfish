@@ -14,15 +14,31 @@ cargo run
 cargo run -- programs/crosscurrent.sf
 ```
 
-The first command opens [Shared tides](programs/shared_tides.sf). The second
+The first command opens [Bézier wave study](programs/bezier_study.sf), a
+wave field filling the image and shaped by an adjustable cubic curve. The second
 opens [Crosscurrent](programs/crosscurrent.sf). In the left pane, type a source
-path and press **Open**, or use the two sample buttons. An invalid file leaves
+path and press **Open**, or use the sample buttons. An invalid file leaves
 the current program open and shows the validation error. Select a named field
 to inspect its grayscale output, then select **Final Image** to return to the
 declared color output. The right pane shows the field expression, its direct
 dependencies, program source, and live parameter bindings.
 Frames, axes, and component definitions in the left pane can also be selected
 for inspection while the image preview stays on the last selected field.
+
+In Bézier study, move **Start**, **End**, and **Handle a/b** x/y sliders to
+reshape the curve. Adjust **Bend**, **Frequency**, **Cross frequency**, and
+**Modulation** to change how the curve shapes the waves throughout the image.
+Select **Along**, **Across**, **Distance**, **Sweep**, or **Modulated** to inspect
+its fields. Curve distance bends a global coordinate, and crossing waves add
+detail everywhere. Every pixel receives the resulting pattern.
+
+The **Wave lab** button opens [Wave laboratory](programs/wave_lab.sf), with
+sine, triangle, saw, pulse, harmonic, and modulated profiles. Select **Sine**,
+**Triangular**, **Sawtooth**, or **Pulses** to compare profiles. **Harmonics**
+adds second and third harmonics; **Modulated**
+bends a carrier with a crossing wave. Adjust **Overtones**, **Modulation**, and
+**Pulse width**, then return to **Final Image** to see their combined effect.
+The **Shared tides** and **Crosscurrent** buttons open the earlier examples.
 
 The first build downloads and compiles eframe/egui. X11 and Wayland are enabled.
 On a minimal Debian/Ubuntu installation the typical prerequisites are
@@ -35,6 +51,8 @@ On a minimal Debian/Ubuntu installation the typical prerequisites are
 ```sh
 cargo run -- render programs/shared_tides.sf final /tmp/shared-tides.ppm 512 512
 cargo run -- render programs/crosscurrent.sf fine /tmp/fine.ppm 512 512
+cargo run -- render programs/wave_lab.sf modulated /tmp/modulated.ppm 512 512
+cargo run -- render programs/bezier_study.sf final /tmp/bezier.ppm 512 512
 ```
 
 `final` selects the program's declared output. A stable field ID such as
@@ -44,11 +62,13 @@ The files use binary PPM (P6) to keep the CLI independent of image libraries.
 ## Generate a comparison study
 
 ```sh
-cargo run -- generate generated/study-42
-cargo run -- gallery generated/study-42
+cargo run -- generate generated/waveforms-42
+cargo run -- gallery generated/waveforms-42
 ```
 
 The first command creates twelve reproducible A/B pairs with batch seed 42.
+Each pair combines stripes and rings using sine, triangle, saw, pulse,
+harmonic, or modulated profiles.
 The output directory must be new. Each pair includes two self-contained `.sf`
 programs and their 256 × 256 PPM previews. The native gallery displays the
 images with shuffled A/B labels; click an image or **Inspect** to open its
@@ -57,8 +77,9 @@ The conditions are revealed in source comments and `answers.tsv`.
 
 Within a pair, one program uses related orientations, harmonic scales, phase
 offsets, and planned placements; the other samples those choices independently.
-Both use the same motif structure, composition, weights, palette, and number of
-field operations. Across pairs, motif count and composition also vary.
+Both use the same motif structure, waveform profiles, pulse widths, harmonic
+detail, modulation depth, composition, weights, palette, and number of field
+operations. Across pairs, profiles, motif count, and composition also vary.
 
 To choose another seed or pair count:
 
@@ -84,20 +105,27 @@ cargo check
 cargo test
 ```
 
-Tests cover parsing and validation, both saved programs, deterministic wave
+Tests cover parsing and validation, the saved programs, deterministic wave
 behavior, changed bindings, shared rotation, grayscale intermediate rendering,
-the final color output, invalid render requests, reproducible generated pairs,
+phase and frequency semantics, pulse-width limits, the final color output,
+invalid render requests, reproducible generated pairs,
 matched field-operation budgets, and batch/gallery loading.
+Curve checks include straight and curved coordinates, an independent dense
+reference, finite endpoints, collapsed handles, shared rotation, live controls,
+and visible variation throughout the image.
 
 ## Current scope
 
 The language deliberately has a small field vocabulary: coordinate transforms,
-waves, arithmetic, composition, and palettes. It supports typed reusable
-components and named frames, plus a small deterministic composition generator.
+sine/triangle/saw/pulse waves, Bézier coordinate fields, arithmetic, composition,
+and palettes. Richer signals use additive harmonics and scalar coordinate
+modulation. It supports
+typed reusable components and named frames, plus a small deterministic
+composition generator.
 It has no imports, loops, recursive components, source editor, graphical editing,
-persistence of slider presets,
-or linear/Bézier elements yet. The latter can become new structured
-components and field operations without changing the program/render boundary.
+persistence of slider presets, multi-segment paths, or curve generation yet.
+Bézier curves currently enter through four uniform control points and expose
+along/across coordinates through the existing field and component model.
 
 Rendering runs synchronously at 448 × 448 in Studio. Color stops are normalized
 RGB values and palette interpolation is specified in the language guide.

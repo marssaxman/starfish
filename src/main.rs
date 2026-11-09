@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod bezier;
 mod comparison;
 mod evaluate;
 mod gallery;
@@ -25,8 +26,8 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     match args.as_slice() {
         [] => launch(
-            StarfishProgram::sample(),
-            "programs/shared_tides.sf".to_owned(),
+            StarfishProgram::from_source(include_str!("../programs/bezier_study.sf"))?,
+            "programs/bezier_study.sf".to_owned(),
         ),
         [flag] if flag == "--help" || flag == "-h" => {
             println!(

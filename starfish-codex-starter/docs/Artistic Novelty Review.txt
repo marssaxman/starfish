@@ -1,0 +1,527 @@
+# Starfish: artistic-novelty review
+
+## Verdict
+
+**The original Starfish idea was not historically unique, even in 2003.** In sufficiently general terms—generate a mathematical program mapping coordinates to color, mutate or randomly construct that program, and select appealing results—it belongs to an established lineage usually called **expression-based evolutionary art**. Karl Sims demonstrated the core mechanism in 1991; Andrej Bauer’s Random Art generated coordinate-to-color expression trees in the late 1990s; several evolutionary-art systems followed; and Evolvotron appeared almost exactly contemporaneously with Starfish. ([dl.acm.org](https://dl.acm.org/doi/10.1145/127719.122752?utm_source=chatgpt.com))
+
+The strictly functional interpretation was also precedented. Peter Henderson’s 1982 *Functional Geometry* described pictures with equations that were themselves pure functional programs. Conal Elliott’s Pan went considerably closer to Starfish in 2001, defining an image as a function from continuous two-dimensional space to color and compiling that idealized representation into finite rendered output. ([worrydream.com](https://worrydream.com/refs/Henderson_1982_-_Functional_Geometry.pdf?utm_source=chatgpt.com))
+
+So I would **not** invest heavily in rebuilding Starfish merely as:
+
+> a typed functional expression graph which maps coordinates to pixels, generated randomly and refined through selection.
+
+That would be a technically modern and possibly beautiful implementation of an existing artistic paradigm.
+
+However:
+
+**The project you are describing now is materially more interesting than that.** I did not find an established project that combines all of the following:
+
+- a deliberately small, typed, pure-functional language of continuous fields;
+- explicit generation of reusable motifs and relationships before the final pixel program exists;
+- coordination of shared frames, orientations, frequencies, phases, scales, and structural relatives across distant graph regions;
+- systematic management of complexity across scale, space, and hierarchy;
+- search over the *distribution that produces programs*, rather than merely mutation of one program at a time;
+- personalized aesthetic learning plus novelty preservation;
+- and an IDE in which every resulting program remains legible, editable, decomposable, and renderable at arbitrary resolution.
+
+There are precedents for every item individually, and sometimes for groups of them. I found no obvious “foo-lab” that already embodies the entire artistic proposition. That makes my answer:
+
+> **Yes, Starfish is novel enough to justify an exploratory implementation—but only if the global compositional architecture is treated as the work’s central contribution.**
+
+A GPU-accelerated Evolvotron would not be sufficiently novel. A system that invents coherent *families of functional structures* and lowers them into executable images probably would be.
+
+---
+
+## What existed before and around 2003
+
+Your memory of the visible scene is understandable. Fractals, iterated function systems, reaction-diffusion, cellular automata, L-systems, and procedural noise dominated much of the public vocabulary. Electric Sheep, for example, used collaboratively evolved fractal-flame animations; its representation and constraints are quite different from Starfish’s. ([dl.acm.org](https://dl.acm.org/doi/10.1145/1124728.1124730?utm_source=chatgpt.com))
+
+But there was also a smaller evolutionary-art community working remarkably close to your territory.
+
+### Peter Henderson: *Functional Geometry*, 1982
+
+Henderson represented pictures using pure functional combinators. A “painter” could be placed into a coordinate frame, transformed, divided, repeated, and recursively composed. It was vector-oriented rather than a continuous scalar-field language, and the artist wrote the program rather than generating it, but the principle that **the description of the picture is an executable pure-functional object** was already explicit. ([worrydream.com](https://worrydream.com/refs/Henderson_1982_-_Functional_Geometry.pdf?utm_source=chatgpt.com))
+
+This is an intellectual ancestor, but not a serious competitive analogue to Starfish’s generator.
+
+### Karl Sims: *Artificial Evolution for Computer Graphics*, 1991
+
+This is the most important historical predecessor.
+
+Sims generated images, textures, and animations from **mutating symbolic Lisp expressions**. A user selected preferred outputs, and the selected expressions reproduced with structural mutations. His function vocabulary included arithmetic, coordinate transformations, noise, vector operations, and image-processing functions. The program was the genotype; evaluating it across coordinates produced the phenotype. ([dl.acm.org](https://dl.acm.org/doi/10.1145/127719.122752?utm_source=chatgpt.com))
+
+That is not merely philosophically similar. It contains most of the elementary Starfish loop:
+
+1. symbolic program;
+2. spatial inputs;
+3. whole-image evaluation;
+4. structural mutation;
+5. human aesthetic selection;
+6. concise saved programs.
+
+Sims even anticipated automatic target-image fitness and the possibility of learning what made generated images visually successful. ([karlsims.com](https://www.karlsims.com/papers/siggraph91-backup.html))
+
+A knowledgeable computational-art historian would almost certainly place Starfish in the lineage beginning here.
+
+### SBART, NEvAr, Steven Rooke, and other evolutionary-art systems
+
+Sims’s work was followed by a cluster of systems that evolved expression-based images.
+
+Tatsuo Unemi’s SBART became a broader interactive evolutionary artwork environment, including still images, animation, collage, and later installations. Penousal Machado and Amílcar Cardoso’s NEvAr, active around 2000–2003, explicitly pursued an “artificial artist” capable of autonomous image generation and explored both human-guided and automatic aesthetic evaluation. Steven Rooke began selectively breeding expression-generated images in 1993 and developed a sustained artistic practice from the method. ([intlab.soka.ac.jp](https://www.intlab.soka.ac.jp/~unemi/papers/KES99.pdf?utm_source=chatgpt.com))
+
+By 2000, there were enough such systems for Machado and Cardoso to describe the “proliferation of Evolutionary Art Tools.” ([researchgate.net](https://www.researchgate.net/publication/220204830_All_the_truth_about_NEvAr?utm_source=chatgpt.com))
+
+This means Starfish was not merely adjacent to an isolated Sims experiment. It unknowingly belonged to an active, if rather obscure, research-art tradition.
+
+### Andrej Bauer: Random Art, 1998–2000
+
+Random Art is the closest predecessor to the unconditional generator in Starfish 2.
+
+A seeded pseudorandom generator constructs a mathematical expression that maps continuous pixel coordinates to color. The expression is built from a probabilistic grammar whose primitives are chosen so that generated trees remain evaluable. The same seed always gives the same program and image, and the continuous function can be sampled at different resolutions. ([usenix.org](https://www.usenix.org/legacyurl/random-art?utm_source=chatgpt.com))
+
+This establishes that “randomly generate a functional coordinate-to-color program” was already a recognizable algorithm before 2003.
+
+Random Art is much shallower than the Starfish you remember. It has little compositional intelligence, no serious graph organization, no interactive program environment, and no learned search process. But its elevator pitch would sound uncomfortably similar.
+
+### Conal Elliott: Pan and Functional Image Synthesis, 2001
+
+Pan is the closest precedent for the *semantics* of Starfish.
+
+Its basic model is essentially:
+
+```text id="8ghpi7"
+Image Color = Point → Color
+```
+
+The image exists conceptually over infinite continuous space. Spatial transforms are functions over points. Image combinators operate on complete idealized images, while an optimizing compiler handles sampling and finite output. ([conal.net](https://conal.net/papers/functional-images/fop-conal.pdf?utm_source=chatgpt.com))
+
+Pan differs decisively in purpose: it is a language for people to compose images, not a system that invents image programs. But the claim that Starfish introduces a pure-functional, resolution-independent image semantics would not survive comparison with Pan.
+
+### Evolvotron, January 2003
+
+This is the historical near-collision.
+
+Evolvotron’s SourceForge project was registered on January 15, 2003. It displays a population of generated images, lets the user select one, and refills the population with mutated descendants. Its image functions are trees of operations over spatial vectors; mutations can replace, insert, remove, or alter subtrees and constants. Users can adjust function weightings and the expected branching of generated trees, save the underlying functions, inspect their complexity, simplify them, mutate them from the command line, and render them at chosen resolutions. ([sourceforge.net](https://sourceforge.net/projects/evolvotron/?utm_source=chatgpt.com))
+
+Evolvotron even encounters the same elementary complexity-management problem you described: trees with too little branching become uninteresting, while trees with too much branching become slow and chaotic. Its solution is largely function weighting and average branching control. ([github.com](https://github.com/WickedSmoke/evolvotron/blob/master/USAGE))
+
+Of all the systems I examined, this is the one most likely to provoke:
+
+> “Oh, you made another Evolvotron.”
+
+There are nevertheless significant differences:
+
+- Evolvotron operates primarily on flat function trees, not a structured compositional IR.
+- It mutates individual images rather than learning a sophisticated generative policy.
+- Its coordination arises incidentally through ancestry and subtree reuse.
+- Its vocabulary includes some relatively high-level pattern-producing nodes; it is less committed to deriving compound visual effects from low-level primitives.
+- It offers no serious model of visual hierarchy or global allocation of complexity.
+- Its user interface is an image breeder, not an IDE for understanding the resulting program.
+
+I would install and use Evolvotron before making any architectural commitment. It is not because you should imitate it, but because every way in which it feels inadequate is likely to clarify Starfish’s actual contribution.
+
+---
+
+## The most relevant post-2003 lineages
+
+### CPPNs and Picbreeder
+
+Compositional Pattern-Producing Networks are probably the strongest conceptual competitor to Starfish’s representation.
+
+A CPPN is a network whose nodes use heterogeneous activation functions—sine, Gaussian, sigmoid, linear, and so on—and whose inputs are usually spatial coordinates. Evaluating the network across the image plane produces pixels. Because the network is a composition of continuous functions, it naturally produces symmetry, repetition, segmentation, and other large-scale regularities. Its topology can be evolved with NEAT. ([gwern.net](https://gwern.net/doc/ai/nn/fully-connected/2007-stanley.pdf?utm_source=chatgpt.com))
+
+Picbreeder turned CPPN evolution into a collaborative online system. Users evolved images, published them, and branched from other users’ lineages. Its most important discovery was that open-ended, objective-free collaborative selection could accumulate unexpected recognizable structures—faces, animals, vehicles, and other forms—through stepping stones that no direct target fitness would have rewarded. ([stars.library.ucf.edu](https://stars.library.ucf.edu/cgi/viewcontent.cgi?article=2880&context=facultybib2010&utm_source=chatgpt.com))
+
+The overlap is substantial:
+
+- coordinates enter a compositional function network;
+- the network defines a resolution-independent image;
+- topology and parameters evolve;
+- choice of primitive functions biases the visual vocabulary;
+- complex regularity emerges indirectly.
+
+The main differences are representational.
+
+A CPPN is a weighted developmental encoding. It is very good at symmetry, repetition, smooth deformation, and elaboration of regular structures. Starfish is potentially a more explicit **domain-specific programming language**, with fields, coordinate systems, transformations, combinators, reusable definitions, and semantic types. A Starfish graph can say something structurally intelligible such as “these three layers share a coordinate frame, these two use harmonically related frequencies, and this motif is reused after a 60-degree rotation.” A CPPN normally contains those relationships only implicitly in weights and topology.
+
+But this is also a warning: **the global coordinator must outperform the indirect regularity that CPPNs get almost for free.** If Starfish produces mostly symmetric organic patterns, Picbreeder will look like the more mature and historically important version.
+
+### Manual procedural node systems
+
+Node-based procedural image construction is now ordinary professional practice.
+
+Adobe Substance 3D Designer represents materials as graphs of generators, noises, filters, transforms, masks, and compositing operations. Material Maker provides a similar open-source graph system, and Blender’s shader and texture nodes offer the same general model. These graphs are parametric, non-destructive, editable, and resolution-independent. ([experienceleague.adobe.com](https://experienceleague.adobe.com/en/docs/substance-3d-designer/using/home?utm_source=chatgpt.com))
+
+Consequently, Starfish cannot plausibly claim novelty merely from being:
+
+- a graph editor;
+- a shader compiler;
+- a procedural texture language;
+- a collection of image operators;
+- or an interactive parameterized renderer.
+
+Those are now standard substrate.
+
+What remains unusual is having the machine **invent and organize** such graphs for abstract artistic purposes while preserving them as comprehensible programs.
+
+### Automatic procedural-material graph synthesis, 2022–2026
+
+This is the modern research area most likely to contain the hypothetical “foo-lab.”
+
+MatFormer, published in 2022, learned to generate semantically valid procedural-material graphs by generating nodes, parameters, and edges in stages. It could also complete partial graphs. ([paulguerrero.net](https://paulguerrero.net/matformer/?utm_source=chatgpt.com))
+
+The 2023 system *Generating Procedural Materials from Text or Image Prompts* extended this to unconditional generation, text-conditioned generation, image-conditioned generation, and graph autocompletion, followed by differentiable parameter optimization. ([yiweihu.netlify.app](https://yiweihu.netlify.app/uploads/hu2023gen/project.html?utm_source=chatgpt.com))
+
+VLMaterial in 2025 converted procedural material graphs into Python programs and fine-tuned a vision-language model to synthesize them from reference images. MultiMat, presented at ICLR 2026, uses both textual and visual graph representations, production-quality Substance data, and constrained search to produce statically valid material programs. ([arxiv.org](https://arxiv.org/abs/2501.18623?utm_source=chatgpt.com))
+
+These systems overlap strongly with a generic description of modern Starfish:
+
+- graphs are programs;
+- programs contain heterogeneous operators;
+- output is parametric and resolution-independent;
+- graph validity must be maintained;
+- models can generate complete graphs;
+- incomplete graphs can be completed;
+- visual feedback can guide search.
+
+They differ in artistic ontology. They are principally **inverse material-authoring systems**: learn from existing professional graphs and reproduce or approximate materials such as wood, stone, fabric, metal, plaster, and patterned surfaces. Their desired output distribution comes from a corpus of production assets.
+
+Starfish’s proposed world is different:
+
+- abstract images rather than physically based materials;
+- a small authored algebra rather than the whole Substance ecosystem;
+- emergence from primitives rather than imitation of a graph corpus;
+- personal aesthetic discovery rather than matching a prompt or reference;
+- structural intelligibility as an artistic property;
+- invention of a visual language, not acceleration of an existing workflow.
+
+Nevertheless, if Starfish becomes “train a transformer to emit image node graphs,” it will be entering a field that is already technically sophisticated. Its distinction has to remain in the representation and the artistic objective, not merely in graph synthesis.
+
+### Evolved grammars and generated drawing programs
+
+There are also recent systems closer to your global-generator idea than I initially expected.
+
+A 2021 project, *Generative Art Using Neural Visual Grammars and Dual Encoders*, evolved a hierarchical visual grammar rather than directly evolving pixels. It specifically sought structured images containing repeated forms with variation, while a pretrained image-text model acted as the critic. The grammar could then render at high resolution. ([ar5iv.labs.arxiv.org](https://ar5iv.labs.arxiv.org/html/2105.00162))
+
+GenerativeGI, introduced in 2023 and extended in 2024, encodes collections of generative-art techniques into a grammar and evolves combinations of techniques and parameters under multiple objectives. Its later work adds a learned classifier intended to reject undesirable output. The authors report familiar problems: noisy results, domination by one technique, program bloat, and difficulty designing fitness functions that preserve diversity. ([gpbib.cs.ucl.ac.uk](https://gpbib.cs.ucl.ac.uk/gi2023/Fredericks_2023_GI.pdf))
+
+Probabilistic Grammatical Evolution goes a step closer to the idea of adjusting the generator itself: production probabilities are adapted according to productions involved in fitter programs. Co-evolutionary variants evolve both grammars and program genotypes. These are general program-synthesis techniques rather than mature artistic systems, but they mean that **learning the probability distribution over grammar productions is not by itself novel**. ([arxiv.org](https://arxiv.org/abs/2103.08389?utm_source=chatgpt.com))
+
+Strongly typed genetic programming has likewise existed since 1995, and newer systems can synthesize pure, typed, higher-order functional programs. Thus typing will be enormously useful engineering, but it is not an artistic novelty claim. ([direct.mit.edu](https://direct.mit.edu/evco/article/3/2/199/731/Strongly-Typed-Genetic-Programming?utm_source=chatgpt.com))
+
+---
+
+## The trainer is useful, but not independently novel
+
+The proposed “goal-oriented randomness trainer” also sits in established research territory.
+
+Interactive evolutionary computation has long used the person as an aesthetic fitness function. Its chronic weakness is evaluator fatigue: people cannot reliably rank thousands of images. That is exactly the problem you experienced when selecting a handful of good images from enormous batches. ([arxiv.org](https://arxiv.org/abs/2009.12216?utm_source=chatgpt.com))
+
+McCormack and Lomas’s 2020 work trained convolutional networks on an individual artist’s previous evaluations and used the resulting model to identify promising unexplored regions of genotype and phenotype space. That is quite close to your idea of learning your own aesthetic rather than a generic definition of beauty. ([arxiv.org](https://arxiv.org/abs/2009.12216?utm_source=chatgpt.com))
+
+Quality-diversity methods such as MAP-Elites explicitly search for a diverse collection of high-quality solutions rather than one optimum. They have already been applied to aesthetic evolution. ([dl.acm.org](https://dl.acm.org/doi/10.1007/978-3-031-03789-4_24?utm_source=chatgpt.com))
+
+Complexity measures have also been studied directly in evolutionary art. The results support your intuition that no single FFT, entropy, or compression statistic will solve the problem: different complexity measures correlate differently with different artists and datasets, with no universally superior measure. ([arxiv.org](https://arxiv.org/abs/2201.01470?utm_source=chatgpt.com))
+
+And, as of July 2026, Sakana AI and collaborators have recreated Picbreeder using vision-language models in place of human selectors, studying novelty, semantic salience, phylogenetic complexity, exploratory noise, and behavioral diversity among agents. Their results report substantial qualitative differences between automated and historical human search, which is useful evidence that replacing the artist with a generic visual model does not automatically yield open-ended creativity. ([pub.sakana.ai](https://pub.sakana.ai/picbreeder-vlm/?utm_source=chatgpt.com))
+
+Therefore none of these alone is the new idea:
+
+- aesthetic preference learning;
+- automatic complexity scoring;
+- novelty search;
+- quality-diversity archives;
+- VLM-based criticism;
+- or probabilistic grammar adaptation.
+
+They are tools available to Starfish.
+
+---
+
+## Where I think the genuine gap is
+
+The defensible novelty is not “functional images,” “genetic art,” “procedural graphs,” or “AI-guided generation.” It is a particular theory of visual composition:
+
+> **Generate relationships and reusable structural families first; lower them into a pure pixel function second.**
+
+Most older expression-based systems mutate a tree or graph directly. Any coordination between two branches is accidental, inherited, or caused by a high-level primitive that bakes in the desired effect.
+
+Your proposed coordinator can instead create facts such as:
+
+- these components inhabit one oblique coordinate system;
+- these frequencies are in a small-integer ratio;
+- these layers share a phase origin but vary in scale;
+- these two forms are siblings derived from one motif;
+- this motif recurs in foreground and background with controlled mutation;
+- these directions form a 60-, 90-, or 120-degree family;
+- this region receives coarse structure while that region carries fine activity;
+- complexity increases through a hierarchy rather than merely through node count;
+- a visual event is repeated, contrasted, interrupted, or answered elsewhere.
+
+It would then lower those facts into ordinary field computations.
+
+This resembles developmental encodings, visual grammars, shape grammars, and procedural modeling. CPPNs deliberately encode regularity; neural visual grammars evolve repetition with variation; procedural-material graphs contain reusable subgraphs. But I did not find a mature abstract-image system whose explicit central representation is a **relational compositional plan over reusable field motifs**, subsequently compiled into a compact pure-functional image program. The closest systems tend to choose one of two extremes:
+
+1. a flat mathematical phenotype whose coherence emerges incidentally; or
+2. a vocabulary of recognizable high-level drawing or material techniques.
+
+Starfish could inhabit the middle: rich coordination without prescribing what the resulting picture depicts.
+
+That is a worthwhile artistic research question, not just an implementation variation.
+
+---
+
+## A comparison of the nearest neighbors
+
+| System or lineage | Similarity to Starfish | What prevents it from subsuming the current idea |
+|---|---:|---|
+| Pan / Functional Image Synthesis | High semantic overlap | Manually authored; no program invention or aesthetic search |
+| Random Art | High overlap with random genesis | Minimal grammar, flat trees, little compositional organization |
+| Sims / SBART / NEvAr | Very high historical overlap | Primarily direct evolution of expressions; limited explicit global structure |
+| Evolvotron | Closest practical software | Flat image-function mutation and manual weighting; no serious coordinator or learned generative distribution |
+| CPPN / Picbreeder | Very high representational and evolutionary overlap | Relationships are implicit in a neural developmental encoding rather than explicit editable program semantics |
+| Substance / Material Maker | High graph and IDE overlap | Manual authoring, mostly material production, no autonomous artistic generator |
+| MatFormer and successors | High automatic graph-synthesis overlap | Corpus-trained inverse material design rather than open-ended abstract visual-language discovery |
+| Neural visual grammars | High hierarchical-generation overlap | Mark/grammar-based representation and prompt-directed critic rather than continuous field algebra |
+| GenerativeGI | High grammar/search overlap | Combines predefined art techniques; currently much less structurally sophisticated |
+| McCormack/Lomas and QD | High trainer overlap | Search and evaluation layer, not the generative representation itself |
+
+The dangerous comparisons are **Evolvotron**, **Picbreeder**, and **neural visual grammars**. The modern material-program synthesis work is the dangerous technical comparison. Pan is the dangerous programming-language comparison.
+
+---
+
+## Artistic novelty versus technical novelty
+
+It helps to separate three kinds of originality.
+
+### Technical novelty
+
+Most individual mechanisms are not new. On a rough five-point scale:
+
+| Proposed element | Novelty |
+|---|---:|
+| Continuous coordinate-to-color functions | 1/5 |
+| Pure-functional image combinators | 1/5 |
+| Random expression construction | 1/5 |
+| Typed evolutionary programs | 1/5 |
+| User-guided mutation | 1/5 |
+| Learned personal aesthetic critic | 2/5 |
+| Adaptive grammar probabilities | 2/5 |
+| Quality-diversity and novelty archives | 2/5 |
+| Relational motif coordinator for field programs | 4/5 |
+| Integrated compiler, IDE, generator, and trainer | 4/5 |
+
+The last two scores are necessarily provisional because the architecture is not yet specified tightly enough to compare algorithm by algorithm.
+
+### Instrument novelty
+
+An integrated environment could be quite distinctive even where its pieces are known.
+
+Imagine selecting a generated picture and being able to:
+
+- open its source program;
+- see both the high-level compositional plan and lowered render graph;
+- isolate any component;
+- view shared parameters and coordinate frames;
+- sweep a meaningful parameter;
+- compare descendants and ancestors;
+- promote a discovered fragment into a reusable motif;
+- ask the generator for siblings that preserve one relationship while varying another;
+- and retrain the generative policy from those choices.
+
+Material editors expose graphs but do not usually invent open-ended abstract compositions. Evolutionary-art tools breed images but generally do not offer this degree of program comprehension. Programming environments expose code but do not ordinarily maintain an evolving aesthetic population.
+
+That combination would be a new and useful artistic instrument.
+
+### Artwork novelty
+
+This is ultimately decisive.
+
+A system can be technically unprecedented and produce familiar-looking wallpaper. Conversely, an old algorithm can support an artistically original body of work.
+
+Starfish will have succeeded artistically only if its outputs display visual phenomena that are conspicuously difficult to obtain from flat random expression trees or CPPNs: long-range correspondences, families of related forms, coordinated asymmetries, multiscale pacing, repetition with meaningful variation, and a sense that different parts of the image participate in one constructed visual world.
+
+If the resulting gallery consists mainly of:
+
+- psychedelic turbulence;
+- smooth bilateral organisms;
+- noisy clouds;
+- tiled kaleidoscopes;
+- glowing sine-wave interference;
+- or dense “interesting texture,”
+
+then it will read as a continuation of established evolutionary art regardless of the sophistication underneath.
+
+---
+
+## What would make me say “do not build it”
+
+I would advise against a major implementation if the intended architecture settles into any of these forms:
+
+1. **Random Art with more operators.**
+   A typed expression grammar with a larger primitive library will produce greater variety, but not necessarily a new artistic proposition.
+
+2. **Evolvotron with WebGPU.**
+   Better performance, graph display, and a modern interface would be pleasant but primarily restorative engineering.
+
+3. **A home-built CPPN.**
+   Evolving arbitrary function networks over coordinates will rediscover a well-studied representation.
+
+4. **Substance for abstract art.**
+   A manually authored node editor is a substantial undertaking in an already crowded category.
+
+5. **A transformer that emits graphs.**
+   Without a distinctive graph language and compositional model, this becomes a smaller version of MatFormer, VLMaterial, or MultiMat.
+
+6. **A CLIP-scored evolutionary loop.**
+   Text-guided evolutionary grammar systems and VLM-driven Picbreeder now exist. It would also import the visual ontology of internet-trained models, undermining the self-contained synthetic character that makes Starfish interesting.
+
+---
+
+## What would make me say “this is clearly worth doing”
+
+I would define Starfish around these commitments.
+
+### 1. Two genuinely different intermediate representations
+
+The high-level representation should not merely be a convenient AST for the same graph.
+
+It should contain constructs that disappear during lowering:
+
+- motif definitions and instances;
+- families and variations;
+- shared frames;
+- relational constraints;
+- spatial roles;
+- harmonic and phase relationships;
+- scale bands;
+- salience or complexity allocations;
+- contrast and correspondence relationships;
+- conditional reuse.
+
+The lower IR remains the pure field DAG that can compile into a shader.
+
+This separation is probably the single most important architectural decision.
+
+### 2. Relationships should be first-class, not emergent metadata
+
+A relationship should be something the generator can create, mutate, preserve, query, and display.
+
+For example, rotating one layer by 90 degrees should not require independently generating a rotation constant that happens to land near π/2. It should arise from a `perpendicular-to` relation that lowers into that constant.
+
+This gives evolution and learning a semantically meaningful search space.
+
+### 3. Reuse should mean identity with controlled variation
+
+Copying a subtree is insufficient. A motif should have a stable identity and multiple instances that can:
+
+- share all parameters;
+- share only selected parameters;
+- derive parameters through transformations;
+- mutate as a family;
+- or diverge while retaining lineage.
+
+This is where the system might produce the visual equivalent of theme and variation rather than mere repetition.
+
+### 4. Complexity should be modeled as a distribution
+
+The old scalar “complexity budget” was useful but too blunt.
+
+The coordinator should allocate complexity across:
+
+- spatial frequency;
+- program hierarchy;
+- image regions;
+- motif families;
+- edge density;
+- contrast;
+- orientation;
+- predictability and interruption;
+- and perhaps perceptual salience.
+
+FFT statistics can be one instrument, but the literature strongly suggests that no universal scalar complexity measure will correspond reliably to aesthetic success. ([arxiv.org](https://arxiv.org/abs/2201.01470?utm_source=chatgpt.com))
+
+### 5. The search system should preserve diversity explicitly
+
+A single learned aesthetic score will eventually collapse into a narrow and exaggerated caricature of what it thinks you like.
+
+Use a quality-diversity archive or related scheme in which “quality” and “difference” are separate. Useful behavioral dimensions might include:
+
+- dominant scale;
+- anisotropy;
+- symmetry;
+- number of motif families;
+- spatial concentration;
+- palette topology;
+- graph depth;
+- reuse ratio;
+- frequency slope;
+- and degree of global coordination.
+
+This is not novel methodology, but it is likely necessary methodology.
+
+### 6. The final artifact should include the program
+
+The work’s artistic identity would be strengthened if each image is inseparable from:
+
+- its source;
+- its structural diagram;
+- its lineage;
+- its seed;
+- and perhaps an interactive parameter neighborhood.
+
+That distinguishes Starfish from opaque raster generators and emphasizes that the system has discovered a compact visual law rather than merely emitted pixels.
+
+---
+
+## The least expensive novelty test
+
+Before building the whole language, compiler, IDE, GPU backend, generator, and trainer, I would construct an deliberately ugly research prototype containing only four generative conditions:
+
+1. a flat Random Art-style expression tree;
+2. an Evolvotron-style mutation tree;
+3. a small CPPN baseline;
+4. the proposed relation-first coordinator lowering into the same primitive field language.
+
+Keep the renderer, primitive vocabulary, node budget, and sampling process as comparable as possible.
+
+Then generate blind galleries and evaluate them on questions more specific than “do I like this?”:
+
+- Does the image contain perceivable long-range relationships?
+- Does it have structure at several scales without becoming uniformly busy?
+- Do separate areas appear related without being literal copies?
+- Does it contain controlled asymmetry?
+- Can one identify motifs or visual events that recur with variation?
+- Does it look composed rather than merely complex?
+- Does it escape the familiar evolutionary-art texture aesthetic?
+- Does inspecting the high-level program explain something meaningful about the image?
+
+The critical experiment is an **ablation**:
+
+> Remove the coordinator while leaving the primitives and computational budget intact.
+
+If viewers cannot reliably distinguish the coordinated results, or if the coordinated images are not more compelling, the proposed novelty has not materialized and there is little reason to build the surrounding infrastructure.
+
+If the distinction is obvious, you have both an artistic result and a research argument.
+
+---
+
+## My final assessment
+
+Your 2003 work was more independently rediscovering a niche field than inventing an entirely new one. In particular, Sims, Random Art, Pan, NEvAr, and Evolvotron invalidate strong historical claims for the basic mechanism.
+
+But I do not think you are facing the dispiriting outcome:
+
+> “Everybody already does exactly this with a standard package.”
+
+There is no dominant contemporary package for automatically inventing inspectable, pure-functional abstract-image programs. Evolvotron is the nearest direct tool, but it remains comparatively primitive. Picbreeder is the canonical evolutionary comparison, but it uses a different representational philosophy. Substance-style systems dominate manual graph authoring, and current AI research dominates material-graph reconstruction, but neither occupies the artistic territory you are proposing.
+
+The project is worth pursuing under this formulation:
+
+> **Starfish is a compiler and exploratory art environment for a relational language of continuous images. It generates high-level compositional programs—motifs, families, coordinate relationships, and distributions of complexity—and lowers them into pure functional field graphs. Search and learned preference help an artist explore that symbolic design space without replacing it with an opaque image model.**
+
+That is not an unprecedented collection of algorithms. It is a sufficiently distinctive artistic and systems proposition.
+
+The strongest sign that this is real novelty is that the global coordinator is not merely a quality-improvement feature. It changes what the genotype *means*. It moves the system from randomly assembling pixel functions to inventing visual organizations. That is the part I would prototype first, and the part on which I would make the go/no-go decision.
+
+I can monitor new work on evolutionary art and procedural-program synthesis and alert you when a particularly close analogue appears.

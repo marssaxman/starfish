@@ -135,7 +135,8 @@ pub fn write_batch(directory: &Path, seed: u64, count: usize) -> Result<(), Stri
             directory.join("README.txt"),
             format!(
                 "Starfish comparison study\nGenerator: {GENERATOR_VERSION}\nBatch seed: {seed}\nPairs: {count}\n\n\
-             Each pair has the same motifs, composition, weights, palette, and field-operation budget.\n\
+             Motifs explore sine, triangle, saw, pulse, harmonic, and modulated waveforms.\n\
+             Each pair has the same motifs, waveform profiles, detail controls, composition, weights, palette, and field-operation budget.\n\
              One condition uses related orientations, harmonic scales, phase offsets, and mirrored placements.\n\
              The other samples these relative choices independently, retaining fine/coarse scale bands.\n\
              Scene rotation, base frequency, and phase controls remain shared in both conditions.\n\n\

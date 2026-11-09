@@ -95,6 +95,12 @@ impl Studio {
                         self.open(&path);
                     }
                     ui.horizontal_wrapped(|ui| {
+                        if ui.small_button("Bézier study").clicked() {
+                            self.open("programs/bezier_study.sf");
+                        }
+                        if ui.small_button("Wave lab").clicked() {
+                            self.open("programs/wave_lab.sf");
+                        }
                         if ui.small_button("Shared tides").clicked() {
                             self.open("programs/shared_tides.sf");
                         }

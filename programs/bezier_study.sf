@@ -1,0 +1,47 @@
+starfish 1;
+program "Bézier wave study" @id("bezier-wave-study") {
+    param start_x: Scalar = -0.72 in -1.6..1.6 step 0.01;
+    param start_y: Scalar = -0.65 in -1.6..1.6 step 0.01;
+    param handle_a_x: Scalar = 1.15 in -1.8..1.8 step 0.01;
+    param handle_a_y: Scalar = -0.65 in -1.8..1.8 step 0.01;
+    param handle_b_x: Scalar = -1.15 in -1.8..1.8 step 0.01;
+    param handle_b_y: Scalar = 0.65 in -1.8..1.8 step 0.01;
+    param end_x: Scalar = 0.72 in -1.6..1.6 step 0.01;
+    param end_y: Scalar = 0.65 in -1.6..1.6 step 0.01;
+    param rotation: Angle = -8deg in -180deg..180deg step 0.5deg;
+    param bend: Scalar = 0.7 in 0..1.5 step 0.01;
+    param frequency: Frequency = 5.5 in 0.2..16 step 0.05;
+    param cross_frequency: Frequency = 7 in 0.2..16 step 0.05;
+    param phase: Angle = 15deg in -180deg..180deg step 0.5deg;
+    param modulation: Scalar = 0.075 in 0..0.2 step 0.005;
+
+    frame shared = rotate(world, rotation);
+    // The endpoints and two handles define one directed cubic curve.
+    frame curved = bezier(shared,
+        point2(start_x, start_y), point2(handle_a_x, handle_a_y),
+        point2(handle_b_x, handle_b_y), point2(end_x, end_y));
+    axis forward = vec2(1, 0);
+    axis sideways = vec2(0, 1);
+    field along: Scalar = dot(curved, forward);
+    field across: Scalar = dot(curved, sideways);
+    field distance: Scalar = abs(across);
+
+    // Curve distance bends a global coordinate continuously across the plane.
+    field sweep: Scalar = dot(shared, forward) + bend * distance;
+    field modulator: Scalar = wave(distance, cross_frequency, phase);
+    field carrier: Scalar = wave(sweep, frequency, phase);
+    field modulated: Scalar = wave(sweep + modulation * modulator, frequency, phase);
+    field cross_pattern: Scalar = triangle(distance, cross_frequency, phase);
+    field overtone: Scalar = wave(2 * sweep, frequency, phase);
+    field pattern: Scalar = tanh(0.65 * modulated + 0.2 * cross_pattern + 0.15 * overtone);
+    field composition: Scalar = pattern;
+
+    palette ink = smooth [
+        rgb(0.035, 0.055, 0.14),
+        rgb(0.05, 0.35, 0.43),
+        rgb(0.87, 0.30, 0.24),
+        rgb(0.97, 0.72, 0.37),
+        rgb(0.97, 0.95, 0.88)
+    ];
+    output image: Field<Color> = palette(ink, composition);
+}

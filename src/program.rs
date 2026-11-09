@@ -78,10 +78,15 @@ pub enum Operation {
     World,
     Parameter(usize),
     Rotate,
+    Bezier,
+    Abs,
     Dot,
     Sub,
     Length,
     Wave,
+    Triangle,
+    Saw,
+    Pulse,
     Add,
     Multiply,
     Negate,
@@ -138,6 +143,7 @@ impl StarfishProgram {
         self.items.iter().find(|item| item.id == id)
     }
 
+    #[cfg(test)]
     pub fn sample() -> Self {
         Self::from_source(include_str!("../programs/shared_tides.sf"))
             .expect("bundled sample must be valid")
@@ -169,8 +175,8 @@ impl<'a> Compiler<'a> {
         for (index, decl) in parsed.decls.iter().enumerate() {
             let name = decl.symbol();
             if [
-                "world", "rotate", "dot", "length", "wave", "tanh", "vec2", "point2", "palette",
-                "rgb", "smooth",
+                "world", "rotate", "dot", "length", "wave", "triangle", "saw", "pulse", "tanh",
+                "vec2", "point2", "palette", "rgb", "smooth", "bezier", "abs",
             ]
             .contains(&name)
                 || symbols.insert(name.to_owned(), index).is_some()
@@ -518,11 +524,37 @@ impl<'a> Compiler<'a> {
             ("point2", [Type::Scalar, Type::Scalar]) => (Operation::Vec2, Type::Point2),
             ("rotate", [Type::FieldPoint, Type::Angle]) => (Operation::Rotate, Type::FieldPoint),
             ("rotate", [Type::Vec2, Type::Angle]) => (Operation::Rotate, Type::Vec2),
+            (
+                "bezier",
+                [
+                    Type::FieldPoint,
+                    Type::Point2,
+                    Type::Point2,
+                    Type::Point2,
+                    Type::Point2,
+                ],
+            ) => (Operation::Bezier, Type::FieldPoint),
+            ("abs", [ty @ (Type::Scalar | Type::FieldScalar)]) => (Operation::Abs, *ty),
             ("dot", [Type::FieldPoint, Type::Vec2]) => (Operation::Dot, Type::FieldScalar),
             ("length", [Type::FieldPoint]) => (Operation::Length, Type::FieldScalar),
             ("wave", [Type::FieldScalar, Type::Frequency, Type::Angle]) => {
                 (Operation::Wave, Type::FieldScalar)
             }
+            ("triangle", [Type::FieldScalar, Type::Frequency, Type::Angle]) => {
+                (Operation::Triangle, Type::FieldScalar)
+            }
+            ("saw", [Type::FieldScalar, Type::Frequency, Type::Angle]) => {
+                (Operation::Saw, Type::FieldScalar)
+            }
+            (
+                "pulse",
+                [
+                    Type::FieldScalar,
+                    Type::Frequency,
+                    Type::Angle,
+                    Type::Scalar,
+                ],
+            ) => (Operation::Pulse, Type::FieldScalar),
             ("tanh", [Type::FieldScalar]) => (Operation::Tanh, Type::FieldScalar),
             _ => {
                 return Err(format!(
@@ -574,6 +606,51 @@ pub fn display_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bezier_frames_require_four_uniform_points_and_point_field_input() {
+        let base = r#"starfish 1; program "Curve contract" {
+            frame curve = bezier(world, point2(0, 0), point2(0.3, 0), point2(0.7, 0), point2(1, 0));
+            field across = abs(dot(curve, vec2(0, 1)));
+            palette ink = smooth [rgb(0, 0, 0), rgb(1, 1, 1)];
+            output image = palette(ink, across);
+        }"#;
+        assert!(StarfishProgram::from_source(base).is_ok());
+        for invalid in [
+            base.replace("bezier(world,", "bezier(point2(0, 0),"),
+            base.replace("point2(0.3, 0)", "vec2(0.3, 0)"),
+            base.replace("point2(0.7, 0)", "world"),
+            base.replace(", point2(1, 0)", ""),
+            base.replace("abs(dot(curve, vec2(0, 1)))", "abs(curve)"),
+        ] {
+            assert!(StarfishProgram::from_source(&invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn waveform_calls_enforce_coordinate_frequency_phase_and_width_types() {
+        for expression in [
+            "triangle(world, 2cycles, 0rad)",
+            "triangle(dot(world, vec2(1, 0)), 2, 0rad)",
+            "saw(dot(world, vec2(1, 0)), 2cycles, 0)",
+            "saw(dot(world, vec2(1, 0)), 2cycles)",
+            "pulse(dot(world, vec2(1, 0)), 2cycles, 0rad)",
+            "pulse(dot(world, vec2(1, 0)), 2cycles, 0rad, 90deg)",
+            "pulse(dot(world, vec2(1, 0)), 2cycles, 0rad, length(world))",
+        ] {
+            let source = format!(
+                r#"starfish 1; program "Invalid waveform" {{
+                field value = {expression};
+                palette ink = smooth [rgb(0, 0, 0), rgb(1, 1, 1)];
+                output image = palette(ink, value);
+            }}"#
+            );
+            assert!(
+                StarfishProgram::from_source(&source).is_err(),
+                "{expression}"
+            );
+        }
+    }
 
     #[test]
     fn both_saved_programs_compile_with_distinct_structures() {

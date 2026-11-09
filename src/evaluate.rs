@@ -2,7 +2,10 @@
 
 use std::f32::consts::TAU;
 
-use crate::program::{Operation, ParameterBindings, StarfishProgram, Type};
+use crate::{
+    bezier::BezierFrame,
+    program::{Operation, ParameterBindings, StarfishProgram, Type},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Value {
@@ -33,6 +36,7 @@ pub struct Evaluator<'a> {
     order: Vec<usize>,
     values: Vec<Value>,
     rotations: Vec<Option<(f32, f32)>>,
+    curves: Vec<Option<BezierFrame>>,
 }
 
 impl<'a> Evaluator<'a> {
@@ -83,6 +87,7 @@ impl<'a> Evaluator<'a> {
             order,
             values: vec![Value::Scalar(0.0); program.nodes.len()],
             rotations: vec![None; program.nodes.len()],
+            curves: (0..program.nodes.len()).map(|_| None).collect(),
         };
         // Uniform values and rotation angles depend on bindings, but not on pixels.
         for &index in &evaluator.order.clone() {
@@ -91,11 +96,25 @@ impl<'a> Evaluator<'a> {
                 evaluator.rotations[index] =
                     Some(evaluator.values[node.inputs[1]].scalar().sin_cos());
             }
+            if matches!(node.operation, Operation::Bezier) {
+                let points =
+                    std::array::from_fn(|slot| evaluator.values[node.inputs[slot + 1]].point());
+                evaluator.curves[index] = Some(BezierFrame::new(points)?);
+            }
             if !matches!(
                 node.ty,
                 Type::FieldScalar | Type::FieldPoint | Type::FieldColor
             ) {
                 evaluator.evaluate_node(index, 0.0, 0.0);
+            }
+        }
+        for &index in &evaluator.order {
+            let node = &program.nodes[index];
+            if matches!(node.operation, Operation::Pulse) {
+                let width = evaluator.values[node.inputs[3]].scalar();
+                if !width.is_finite() || !(0.0..=1.0).contains(&width) {
+                    return Err("pulse width must be finite and within [0, 1]".into());
+                }
             }
         }
         Ok(evaluator)
@@ -134,6 +153,13 @@ impl<'a> Evaluator<'a> {
                 let [a, b] = input(1).point();
                 Value::Scalar(x * a + y * b)
             }
+            Operation::Bezier => Value::Point(
+                self.curves[index]
+                    .as_ref()
+                    .expect("curve prepared from uniform control points")
+                    .coordinates(input(0).point()),
+            ),
+            Operation::Abs => Value::Scalar(input(0).scalar().abs()),
             Operation::Sub if node.ty == Type::FieldPoint => {
                 let [x, y] = input(0).point();
                 let [a, b] = input(1).point();
@@ -147,6 +173,25 @@ impl<'a> Evaluator<'a> {
             Operation::Wave => Value::Scalar(
                 (TAU * input(1).scalar() * input(0).scalar() + input(2).scalar()).sin(),
             ),
+            Operation::Triangle | Operation::Saw | Operation::Pulse => {
+                let cycles = input(1).scalar() * input(0).scalar() + input(2).scalar() / TAU;
+                Value::Scalar(match node.operation {
+                    Operation::Triangle => {
+                        1.0 - 4.0 * ((cycles + 0.25).rem_euclid(1.0) - 0.5).abs()
+                    }
+                    Operation::Saw => 2.0 * (cycles + 0.5).rem_euclid(1.0) - 1.0,
+                    Operation::Pulse => {
+                        let width = input(3).scalar();
+                        // A tiny negative cycle can round to 1 after wrapping.
+                        if width == 1.0 || cycles.rem_euclid(1.0) < width {
+                            1.0
+                        } else {
+                            -1.0
+                        }
+                    }
+                    _ => unreachable!(),
+                })
+            }
             Operation::Add => Value::Scalar(input(0).scalar() + input(1).scalar()),
             Operation::Multiply => Value::Scalar(input(0).scalar() * input(1).scalar()),
             Operation::Negate => Value::Scalar(-input(0).scalar()),
@@ -172,6 +217,165 @@ fn palette_sample(field: f32, stops: &[[f32; 3]]) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bezier_fields_follow_shared_rotation_and_validate_computed_points() {
+        let program =
+            StarfishProgram::from_source(include_str!("../programs/bezier_study.sf")).unwrap();
+        let rotation = program
+            .parameters
+            .iter()
+            .position(|p| p.id == "rotation")
+            .unwrap();
+        let mut base = ParameterBindings::defaults(&program);
+        base.0[rotation] = 0.0;
+        let mut rotated = base.clone();
+        rotated.0[rotation] = TAU * 0.25;
+        for output in ["along", "across", "distance", "modulated", "composition"] {
+            let expected = Evaluator::new(&program, &base, output)
+                .unwrap()
+                .sample(0.23, -0.31)
+                .scalar();
+            let actual = Evaluator::new(&program, &rotated, output)
+                .unwrap()
+                .sample(-0.31, -0.23)
+                .scalar();
+            assert!(
+                (expected - actual).abs() < 3e-5,
+                "{output}: {actual} != {expected}"
+            );
+        }
+        let invalid = program.source.replace(
+            "point2(start_x, start_y)",
+            "point2(300000000000000000000000000000000000000 * 2, start_y)",
+        );
+        let invalid = StarfishProgram::from_source(&invalid).unwrap();
+        let error = match Evaluator::new(&invalid, &base, "composition") {
+            Err(error) => error,
+            Ok(_) => panic!("accepted a computed infinite control point"),
+        };
+        assert!(error.contains("control points must be finite"));
+    }
+
+    const WAVEFORMS: &str = r#"starfish 1; program "Waveforms" {
+        param frequency: Frequency = 1 in -4..4 step 0.1;
+        param phase: Angle = 0rad in -180deg..180deg step 1deg;
+        param width: Scalar = 0.25 in -1..2 step 0.01;
+        field coordinate = dot(world, vec2(1, 0));
+        field sine = wave(coordinate, frequency, phase);
+        field triangular = triangle(coordinate, frequency, phase);
+        field sawtooth = saw(coordinate, frequency, phase);
+        field pulses = pulse(coordinate, frequency, phase, width);
+        palette ink = smooth [rgb(0, 0, 0), rgb(1, 1, 1)];
+        output image = palette(ink, pulses);
+    }"#;
+
+    #[test]
+    fn waveform_profiles_have_known_values_including_negative_coordinates() {
+        let program = StarfishProgram::from_source(WAVEFORMS).unwrap();
+        let bindings = ParameterBindings::defaults(&program);
+        for (output, samples) in [
+            (
+                "triangular",
+                vec![
+                    (-0.25, -1.0),
+                    (0.0, 0.0),
+                    (0.125, 0.5),
+                    (0.25, 1.0),
+                    (0.5, 0.0),
+                    (0.75, -1.0),
+                ],
+            ),
+            (
+                "sawtooth",
+                vec![
+                    (-0.75, 0.5),
+                    (-0.25, -0.5),
+                    (0.0, 0.0),
+                    (0.25, 0.5),
+                    (0.5, -1.0),
+                    (0.75, -0.5),
+                ],
+            ),
+            (
+                "pulses",
+                vec![
+                    (-0.875, 1.0),
+                    (-0.125, -1.0),
+                    (0.0, 1.0),
+                    (0.125, 1.0),
+                    (0.25, -1.0),
+                    (0.75, -1.0),
+                ],
+            ),
+        ] {
+            let mut evaluator = Evaluator::new(&program, &bindings, output).unwrap();
+            for (x, expected) in samples {
+                let actual = evaluator.sample(x, 0.0).scalar();
+                assert!(
+                    (actual - expected).abs() < 1e-6,
+                    "{output} at {x}: {actual}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn profiles_share_frequency_phase_and_periodic_semantics() {
+        let program = StarfishProgram::from_source(WAVEFORMS).unwrap();
+        let base = ParameterBindings::defaults(&program);
+        for output in ["sine", "triangular", "sawtooth", "pulses"] {
+            for frequency in [-2.0, 0.0, 2.0] {
+                let mut shifted = base.clone();
+                shifted.0[0] = frequency;
+                shifted.0[1] = TAU * 0.25;
+                let mut actual = Evaluator::new(&program, &shifted, output).unwrap();
+                let mut expected = Evaluator::new(&program, &base, output).unwrap();
+                for x in [-1.125, -0.0625, 0.1875, 0.8125] {
+                    let value = actual.sample(x, 0.0).scalar();
+                    let reference = expected.sample(frequency * x + 0.25, 0.0).scalar();
+                    assert!(
+                        (value - reference).abs() < 1e-5,
+                        "{output}, f={frequency}, x={x}"
+                    );
+                    assert!((-1.0..=1.0).contains(&value));
+                    if frequency != 0.0 {
+                        assert!(
+                            (value - actual.sample(x + 1.0 / frequency, 0.0).scalar()).abs() < 1e-5
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pulse_width_endpoints_and_invalid_domains_are_handled() {
+        let program = StarfishProgram::from_source(WAVEFORMS).unwrap();
+        let mut bindings = ParameterBindings::defaults(&program);
+        for (width, expected) in [(0.0, -1.0), (1.0, 1.0)] {
+            bindings.0[2] = width;
+            let mut evaluator = Evaluator::new(&program, &bindings, "pulses").unwrap();
+            for x in [-1.0, -0.125, -f32::MIN_POSITIVE, 0.0, 0.5, 1.0] {
+                assert_eq!(evaluator.sample(x, 0.0).scalar(), expected);
+            }
+        }
+        for width in [-0.1, 1.1] {
+            bindings.0[2] = width;
+            let error = match Evaluator::new(&program, &bindings, "image") {
+                Err(error) => error,
+                Ok(_) => panic!("accepted pulse width {width}"),
+            };
+            assert!(error.contains("pulse width"));
+            // An unrelated intermediate remains inspectable.
+            assert!(Evaluator::new(&program, &bindings, "triangular").is_ok());
+        }
+        let computed =
+            StarfishProgram::from_source(&WAVEFORMS.replace("phase, width)", "phase, 2 * width)"))
+                .unwrap();
+        bindings.0[2] = 0.75;
+        assert!(Evaluator::new(&computed, &bindings, "pulses").is_err());
+    }
 
     #[test]
     fn sine_and_binding_changes_have_known_values() {
